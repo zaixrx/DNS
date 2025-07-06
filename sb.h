@@ -4,7 +4,6 @@
 #include <stddef.h>
 
 #define STRB_FAILURE -1
-#define STRB_MAX_FRAG_LENGTH 4096
 
 typedef struct string_framgent {
 	struct string_framgent *next;
