@@ -24,7 +24,7 @@ typedef enum {
     REFUSED = 5,
 } ResultCode;
 
-struct header {
+struct dns_header {
 	uint16_t id;
 
     	bool recursion_desired;
@@ -44,13 +44,13 @@ struct header {
     	uint16_t resource_entries;
 };
 
-struct question {
+struct dns_question {
 	char     Name[NAME_SIZE];
 	uint16_t Type;
 	uint16_t Class;
 };
 
-struct record {
+struct dns_record {
 	char     Name[NAME_SIZE];
 	uint16_t Type;
 	uint16_t Class;
@@ -59,42 +59,41 @@ struct record {
 	char     D[];
 };
 
-struct A_record {
+struct dns_A_record {
 	char     Name[NAME_SIZE];
 	uint16_t Type;
 	uint16_t Class;
 	uint32_t TTL;
-	uint16_t Len;
-	char     IPv4[INET_ADDRSTRLEN];
+	uint32_t IPv4;
 };
 
 struct dns_packet {
-	struct header     header;
-	struct question **questions;
+	struct dns_header     header;
+	struct dns_question **questions;
 	size_t c_questions;
-	struct record   **answers;
+	struct dns_A_record   **answers;
 	size_t c_answers;
-	struct record   **authorities;
+	struct dns_A_record   **authorities;
 	size_t c_authorities;
-	struct record   **resources;
+	struct dns_A_record   **resources;
 	size_t c_resources;
 };
 
-void dns_print_header  (struct header     header);
-void dns_print_question(struct question question);
-void dns_print_record  (struct A_record   record);
+void dns_print_header  (struct dns_header     header);
+void dns_print_question(struct dns_question question);
+void dns_print_record  (struct dns_A_record   record);
 void dns_print_packet  (struct dns_packet packet);
 
-struct dns_packet *dns_new_packet();
-void free_dns_packet(struct dns_packet *p);
+struct dns_packet *dns_new_packet(struct dns_header header);
+void dns_free_packet(struct dns_packet *p);
 
 // dns_buffer to dns_packet, you have the responsibilty of managing memory
 void dns_btop(struct dns_buffer *b, struct dns_packet *p);
 // dns_packet to dns_buffer, you have the responsibilty of managing memory
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b);
 
-int dns_pwrite_question(struct dns_packet *p, const char* domain);
-int dns_pwrite_record  (struct dns_packet *p, const char* domain, uint32_t ipv4);
-void dns_pprint(struct dns_packet p);
+int dns_pwrite_question(struct dns_packet *p, const char *domain);
+int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4);
+void dns_pprint         (struct dns_packet p);
 
 #endif

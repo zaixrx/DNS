@@ -63,8 +63,8 @@ int main(int argc, char **argv) {
 	dns_btop(dns_rbuf, dns_rp);
 	dns_pprint(*dns_rp);
 
-	free_dns_packet(dns_qp);
-	free_dns_packet(dns_rp);
+	dns_free_packet(dns_qp);
+	dns_free_packet(dns_rp);
 
 	return EXIT_SUCCESS;
 }
