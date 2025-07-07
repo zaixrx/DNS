@@ -11,23 +11,39 @@
 
 #include "dnsutils.h"
 
-uint8_t getb(struct dns_buffer *p) {
-	return (uint8_t)p->buf[p->pos++];
+static inline uint8_t getb(struct dns_buffer *b) {
+	return (uint8_t)b->buf[b->pos++];
 }
 
 // little endian processors only bruv skee
-uint16_t gets(struct dns_buffer *p) {
-	return ((uint16_t)getb(p) << 8) | getb(p);
+static inline uint16_t gets(struct dns_buffer *b) {
+	return ((uint16_t)getb(b) << 8) | getb(b);
 }
 
-uint32_t getl(struct dns_buffer *p) {
-	return ((uint32_t)getb(p) << 24) |
-	       ((uint32_t)getb(p) << 16) |
-	       ((uint32_t)getb(p) << 8)  | getb(p);
+static inline uint32_t getl(struct dns_buffer *b) {
+	return ((uint32_t)getb(b) << 24) |
+	       ((uint32_t)getb(b) << 16) |
+	       ((uint32_t)getb(b) << 8)  | getb(b);
 }
 
 uint8_t seekb(struct dns_buffer *p) {
 	return (uint8_t)p->buf[p->pos];
+}
+
+static inline void writeb(struct dns_buffer *b, uint8_t d) {
+	if (b->size < BUFF_SIZE) b->buf[b->size++] = d;
+}
+
+static inline void writes(struct dns_buffer *b, uint16_t d) {
+	writeb(b, (uint8_t)d & 0xFF);
+	writeb(b, (uint8_t)(d>>8));
+}
+
+static inline void writel(struct dns_buffer *b, uint32_t d) {
+	writeb(b, (uint8_t)d & 0xFF);
+	writeb(b, (uint8_t)(d>>8));
+	writeb(b, (uint8_t)(d>>16));
+	writeb(b, (uint8_t)(d>>24));
 }
 
 int parse_header(struct dns_buffer *p, struct header *out) {
@@ -58,6 +74,9 @@ int parse_header(struct dns_buffer *p, struct header *out) {
 	out->resource_entries      = gets(p);
 
 	return HEADER_SIZE;
+}
+
+void write_header(struct dns_buffer *p, struct header h) {
 }
 
 void print_header(struct header h) {
@@ -106,6 +125,9 @@ uint32_t parse_labels(struct dns_buffer *p, StringBuilder *strb) {
 	return size+1;
 }
 
+void write_labels(struct dns_buffer *p, const char *domain) {
+}
+
 int parse_questions(struct dns_buffer *p, struct question **questions, int questions_count) {
 	StringBuilder *strb = strb_create();
 
@@ -136,6 +158,9 @@ int parse_questions(struct dns_buffer *p, struct question **questions, int quest
 	}	
 
 	return strb_free(strb);
+}
+
+void write_questions(struct dns_buffer *p, const char **questions) {
 }
 
 void print_question(struct question q) {

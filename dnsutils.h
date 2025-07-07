@@ -80,21 +80,21 @@ struct dns_packet {
 	size_t c_resources;
 };
 
-uint16_t gets(struct dns_buffer *p);
-uint32_t getl(struct dns_buffer *p);
-uint8_t seekb(struct dns_buffer *p);
+void dns_print_header  (struct header     header);
+void dns_print_question(struct question question);
+void dns_print_record  (struct A_record   record);
+void dns_print_packet  (struct dns_packet packet);
 
-uint8_t consume_flag(uint16_t *flags, int len);
-int parse_header(struct dns_buffer *p, struct header *out);
-void print_header(struct header h);
-
-uint32_t parse_labels(struct dns_buffer *p, StringBuilder *strb);
-int parse_questions(struct dns_buffer *p, struct question **questions, int questions_count);
-void print_question(struct question q);
-int parse_A_records(struct dns_buffer *p, struct A_record **records, int records_count);
-void print_record(struct A_record record);
-
-int create_dns_packet(struct dns_buffer *p, struct dns_packet *out);
+struct dns_packet *dns_new_packet();
 void free_dns_packet(struct dns_packet *p);
+
+// dns_buffer to dns_packet, you have the responsibilty of managing memory
+void dns_btop(struct dns_buffer *b, struct dns_packet *p);
+// dns_packet to dns_buffer, you have the responsibilty of managing memory
+void dns_ptob(struct dns_packet *p, struct dns_buffer *b);
+
+int dns_pwrite_question(struct dns_packet *p, const char* domain);
+int dns_pwrite_record  (struct dns_packet *p, const char* domain, uint32_t ipv4);
+void dns_pprint(struct dns_packet p);
 
 #endif
