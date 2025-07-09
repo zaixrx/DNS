@@ -55,16 +55,12 @@ int main(int argc, char **argv) {
 	header.recursion_desired = true;
 	header.authed_data       = true;
 	dns_qp.header = header;
+
 	dns_pwrite_question(&dns_qp, "google.com");
+	dns_pprint(dns_qp);
 
 	dns_ptob(&dns_qp, &dns_qbuf);
 	printf("converted question packet to buffer\n");
-
-	bzero(&dns_qp, sizeof dns_qp);
-	dns_btop(&dns_qbuf, &dns_qp);
-	dns_pprint(dns_qp);
-
-	write_to_file("duck", &dns_qbuf);
 
 	sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	setup_address(&addr, DNS_IPV4, DNS_PORT);

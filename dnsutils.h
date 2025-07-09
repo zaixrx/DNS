@@ -1,7 +1,6 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-#include "sb.h"
 #include <stdbool.h>
 #include <arpa/inet.h>
 

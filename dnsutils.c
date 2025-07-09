@@ -32,22 +32,36 @@ static inline uint8_t getb(struct dns_buffer *b) {
 	return (uint8_t)b->buf[b->pos++];
 }
 
+/*
 static inline uint16_t gets(struct dns_buffer *b) {
 	return 	((uint16_t)getb(b) << 0)|
 		((uint16_t)getb(b) << 8);
 }
 
 static inline uint32_t getl(struct dns_buffer *b) {
-	return 	((uint32_t)getb(b) << 0) |
+	return htonl(
+		((uint32_t)getb(b) << 0) |
 		((uint32_t)getb(b) << 8) |
 		((uint32_t)getb(b) << 16)|
-		((uint32_t)getb(b) << 24);
+		((uint32_t)getb(b) << 24)
+	);
+}
+*/
+
+static inline uint16_t gets(struct dns_buffer *b) {
+	uint16_t val = ntohs(*(uint16_t*)(b->buf+b->pos)); b->pos += 2;
+	return val;
 }
 
-static inline void getr(struct dns_buffer *b, void *d, uint8_t d_size) {
+static inline uint16_t getl(struct dns_buffer *b) {
+	uint32_t val = ntohl(*(uint32_t*)(b->buf+b->pos)); b->pos += 4;
+	return val;
+}
+
+static inline void getr(struct dns_buffer *b, char *d, uint8_t d_size) {
 	if  (b->pos + d_size >= BUFF_SIZE) return;
-	memcpy(d, b->buf, d_size);
-	b->size += d_size;
+	memcpy(d, b->buf+b->pos, d_size);
+	b->pos += d_size;
 }
 
 static inline uint8_t seekb(struct dns_buffer *p) {
@@ -55,10 +69,12 @@ static inline uint8_t seekb(struct dns_buffer *p) {
 }
 
 static inline void writeb(struct dns_buffer *b, uint8_t d) {
-	if (b->size >= BUFF_SIZE) return;
-	b->buf[b->size++] = d;
+	if (b->size + 1 >= BUFF_SIZE) return;
+	b->buf[b->size] = d;
+	b->size += 1;
 }
 
+/*
 static inline void writes(struct dns_buffer *b, uint16_t d) {
 	writeb(b, (uint8_t)(d >> 0  & 0xFF));
 	writeb(b, (uint8_t)(d >> 8  & 0xFF));
@@ -70,6 +86,19 @@ static inline void writel(struct dns_buffer *b, uint32_t d) {
 	writeb(b, (uint8_t)(d >> 16 & 0xFF));
 	writeb(b, (uint8_t)(d >> 24 & 0xFF));
 }
+*/
+
+static inline void writes(struct dns_buffer *b, uint16_t d) {
+	if (b->size + 2 >= BUFF_SIZE) return;
+	*(uint16_t*)(b->buf+b->size) = htons(d);
+	b->size += 2;
+}
+
+static inline void writel(struct dns_buffer *b, uint32_t d) {
+	if (b->size + 4 >= BUFF_SIZE) return;
+	*(uint32_t*)(b->buf+b->size) = htonl(d);
+	b->size += 4;
+}
 
 // write range
 static inline void writer(struct dns_buffer *b, const char *d, size_t d_size) {
@@ -78,26 +107,25 @@ static inline void writer(struct dns_buffer *b, const char *d, size_t d_size) {
 	b->size += d_size;
 }
 
-uint32_t parse_labels(struct dns_buffer *b, StringBuilder *strb) {
-	uint8_t  len  = getb(b), next_len = 0;
-	uint16_t size = 1;
+uint32_t parse_labels(struct dns_buffer *b, char *name) {
+	uint8_t  label_size  = getb(b), next_len = 0;
+	uint16_t buffer_size = 1, name_size = 0;
+	char     label[64];
 
-	char label[64];
-
-	while (len > 0) {
-		getr(b, label, len);
+	while (label_size  > 0) {
+		getr(b, label, label_size);
 		next_len = getb(b);
-		size += len + 1;
 
-		if (next_len > 0) label[len++] = '.';
-		label[len] = '\0';
+		buffer_size += label_size + 1;
+		label[label_size++] = next_len > 0 ? '.' : '\0';
 
-		if (strb_append(strb, label) < 0) return -1;
+		memcpy(name + name_size, label, label_size);
+		name_size += label_size;
 
-		len = next_len;
+		label_size = next_len;
 	}
 
-	return size;
+	return buffer_size;
 }
 
 int next_label(const char *domain, char *label, int *offset) {
@@ -213,7 +241,6 @@ void dns_print_header(struct dns_header h) {
 }
 
 int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, int questions_count) {
-	StringBuilder *strb = strb_create();
 
 	while (questions_count-- > 0) {
 		struct dns_question *question = malloc(sizeof(struct dns_question));
@@ -231,17 +258,15 @@ int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, i
 			must_return 	 = true;
 		} 
 
-		if (parse_labels(p, strb) < 0) return -1;
-		p->pos = must_return ? org_pos : p->pos;
+		parse_labels(p, question->Name);
 
-		if (strb_concat(strb, question->Name) < 0) return -1;
-		if (strb_reset(strb) < 0) 		   return -1;
+		p->pos = must_return ? org_pos : p->pos;
 
 		question->Type   = gets(p);
 		question->Class  = gets(p);
 	}	
 
-	return strb_free(strb);
+	return 1;
 }
 
 // NOT_TESTED
@@ -270,8 +295,6 @@ void dns_print_question(struct dns_question q) {
 }
 
 int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int records_count) {
-	StringBuilder *strb = strb_create();
-
 	while (--records_count >= 0) {
 		struct dns_A_record *record = malloc(sizeof(struct dns_A_record));
 		records[records_count] = record;
@@ -288,11 +311,8 @@ int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int r
 			must_return 	 = true;
 		} 
 
-		int size = parse_labels(b, strb);
+		int size = parse_labels(b, record->Name);
 		b->pos = must_return ? org_pos : b->pos;
-
-		if (size < 0)             return -1;
-		if (strb_reset(strb) < 0) return -1;
 
 		record->Type   = gets(b);
 		record->Class  = gets(b);
@@ -301,7 +321,7 @@ int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int r
 		record->IPv4   = getl(b);
 	}
 
-	return strb_free(strb);
+	return 0;
 }
 
 // NOT_TESTED
