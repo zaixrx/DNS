@@ -25,23 +25,29 @@
 	a dns_packet describes the data represeted by the buffer in a structured
 	manner
 
-	when I implement an algorithm my philosphy is: if you give the algorithm a distupted
-	input, you'll only fuck yourself
+	when I implement an algorithm my philosphy is: if you give the algorithm a disrupted input, you'll only fuck yourself which is rather a trival thinking pattern!
 */
 
 static inline uint8_t getb(struct dns_buffer *b) {
 	return (uint8_t)b->buf[b->pos++];
 }
 
-// little endian processors only bruv skee
 static inline uint16_t gets(struct dns_buffer *b) {
-	return ((uint16_t)getb(b) << 8) | getb(b);
+	return 	((uint16_t)getb(b) << 0)|
+		((uint16_t)getb(b) << 8);
 }
 
 static inline uint32_t getl(struct dns_buffer *b) {
-	return ((uint32_t)getb(b) << 24) |
-	       ((uint32_t)getb(b) << 16) |
-	       ((uint32_t)getb(b) << 8)  | getb(b);
+	return 	((uint32_t)getb(b) << 0) |
+		((uint32_t)getb(b) << 8) |
+		((uint32_t)getb(b) << 16)|
+		((uint32_t)getb(b) << 24);
+}
+
+static inline void getr(struct dns_buffer *b, void *d, uint8_t d_size) {
+	if  (b->pos + d_size >= BUFF_SIZE) return;
+	memcpy(d, b->buf, d_size);
+	b->size += d_size;
 }
 
 static inline uint8_t seekb(struct dns_buffer *p) {
@@ -49,64 +55,79 @@ static inline uint8_t seekb(struct dns_buffer *p) {
 }
 
 static inline void writeb(struct dns_buffer *b, uint8_t d) {
-	if (b->size < BUFF_SIZE) b->buf[b->size++] = d;
+	if (b->size >= BUFF_SIZE) return;
+	b->buf[b->size++] = d;
 }
 
 static inline void writes(struct dns_buffer *b, uint16_t d) {
-	writeb(b, (uint8_t)d & 0xFF);
-	writeb(b, (uint8_t)(d>>8));
+	writeb(b, (uint8_t)(d >> 0  & 0xFF));
+	writeb(b, (uint8_t)(d >> 8  & 0xFF));
 }
 
 static inline void writel(struct dns_buffer *b, uint32_t d) {
-	writeb(b, (uint8_t)d & 0xFF);
-	writeb(b, (uint8_t)(d>>8));
-	writeb(b, (uint8_t)(d>>16));
-	writeb(b, (uint8_t)(d>>24));
+	writeb(b, (uint8_t)(d >> 0  & 0xFF));
+	writeb(b, (uint8_t)(d >> 8  & 0xFF));
+	writeb(b, (uint8_t)(d >> 16 & 0xFF));
+	writeb(b, (uint8_t)(d >> 24 & 0xFF));
 }
 
 // write range
 static inline void writer(struct dns_buffer *b, const char *d, size_t d_size) {
-	if (b->size+d_size >= 512) return;
-	memcpy(b->buf+b->size, d, d_size);
-	b->size += b->size;
+	if (b->size + d_size >= BUFF_SIZE) return;
+	memcpy(b->buf + b->size, d, d_size);
+	b->size += d_size;
 }
 
-uint32_t parse_labels(struct dns_buffer *p, StringBuilder *strb) {
-	char    *buf  = p->buf+p->pos;
-	uint8_t  len  = *buf++, next_len = 0;
-	uint32_t size = 0;
+uint32_t parse_labels(struct dns_buffer *b, StringBuilder *strb) {
+	uint8_t  len  = getb(b), next_len = 0;
+	uint16_t size = 1;
+
+	char label[64];
 
 	while (len > 0) {
-		next_len = *(buf+len);
-		*(buf+len) = '\0';
+		getr(b, label, len);
+		next_len = getb(b);
+		size += len + 1;
 
-		if (strb_append(strb, buf) < 0) return -1;
-		*(buf+len) = next_len; // learned that the hard way
+		if (next_len > 0) label[len++] = '.';
+		label[len] = '\0';
 
-		buf  += len+1;
-		size += len+1;
-		len   = next_len;
+		if (strb_append(strb, label) < 0) return -1;
+
+		len = next_len;
 	}
 
-	p->pos += size+1;
-	return size+1;
+	return size;
 }
 
-// NOT_TESTED
+int next_label(const char *domain, char *label, int *offset) {
+	int    label_size = 0;
+
+	const char *buf = domain + *offset;
+
+	while (buf[label_size] != '.' && buf[label_size] != '\0') { label_size++; }
+	if (label_size == 0) return EOF;
+
+	memcpy(label, buf, label_size); label[label_size] = '\0';
+	*offset += buf[label_size] == '\0' ? label_size : label_size + 1;
+
+	return label_size;
+}
+
 int write_labels(struct dns_buffer *b, const char *domain) {
 	if (domain == NULL || *domain == '\0') return 0;
 	
-	uint8_t  i = 0;
-	int offset = 0;
-	for (i = 0; (domain+offset)[i] != '\0'; i++) {
-		if (domain[i] == '.') {
-			writer(b, domain+offset, i);
-			offset = i+1; i = 0; 
-		}
-	}
-	writeb(b, '\0');
+	char label[64];
+	int  lsize, size = 0, offset = 0;
 
-	return i+1;
+	while ((lsize = next_label(domain, label, &offset)) != EOF) {
+		writeb(b, lsize);
+		writer(b, label, lsize);
+		size += lsize+1;
+	}
+
+	writeb(b, '\0');
+	return size+1;
 }
 
 int dns_parse_header(struct dns_buffer *b, struct dns_header *out) {
@@ -116,7 +137,7 @@ int dns_parse_header(struct dns_buffer *b, struct dns_header *out) {
 
 	uint16_t flags = gets(b);
 
-	uint8_t  first = flags & 0xF;
+	uint8_t  first = flags & 0xFF;
 	uint8_t second = flags >> 8;
 
 	out->rescode             = (ResultCode)(flags & 0xF);
@@ -142,7 +163,6 @@ int dns_parse_header(struct dns_buffer *b, struct dns_header *out) {
 // NOT_TESTED
 int dns_write_header(struct dns_header h, struct dns_buffer *b) {
 	writes(b, h.id);
-	writes(b, h.questions);
 
 	uint8_t first = 0, second = 0;
 	first  |= h.rescode & 0xF;
@@ -157,6 +177,7 @@ int dns_write_header(struct dns_header h, struct dns_buffer *b) {
 	second |= h.response             << 7;
 	writes(b, second << 8 | first);
 
+	writes(b, h.questions);
 	writes(b, h.answers);
 	writes(b, h.authoritative_entries);
 	writes(b, h.resource_entries);
@@ -168,14 +189,17 @@ void dns_print_header(struct dns_header h) {
 	cJSON_AddNumberToObject(json, "id", h.id);
 
 	cJSON *flags = cJSON_CreateObject();
+	cJSON_AddBoolToObject  (flags, "recursion desired", h.recursion_desired);
+	cJSON_AddBoolToObject  (flags, "truncated message", h.truncated_message);
+	cJSON_AddBoolToObject  (flags, "authoritative answer", h.authoritative_answer);
+	cJSON_AddNumberToObject(flags, "opcode", h.opcode);
+	cJSON_AddBoolToObject  (flags, "response", h.response);
 	cJSON_AddNumberToObject(flags, "rescode" , h.rescode);
 	cJSON_AddBoolToObject  (flags, "checking disabled", h.checking_disabled);
-	cJSON_AddNumberToObject(flags, "authed data", h.authed_data);
-	cJSON_AddNumberToObject(flags, "z", h.z);
-	cJSON_AddNumberToObject(flags, "recursion available", h.recursion_available);
-	cJSON_AddNumberToObject(flags, "truncated message", h.truncated_message);
-	cJSON_AddNumberToObject(flags, "opcode", h.opcode);
-	cJSON_AddNumberToObject(flags, "response", h.response);
+	cJSON_AddBoolToObject  (flags, "authed data", h.authed_data);
+	cJSON_AddBoolToObject  (flags, "z", h.z);
+	cJSON_AddBoolToObject  (flags, "recursion available", h.recursion_available);
+
 	cJSON_AddItemToObject(json, "flags", flags);
 
 	cJSON_AddNumberToObject(json, "questions", h.questions);
@@ -315,7 +339,6 @@ void dns_print_record(struct dns_A_record record) {
 	cJSON_Delete(json);
 }
 
-// NOT_TESTED
 struct dns_packet *dns_new_packet(struct dns_header header) {
 	struct dns_packet *packet = calloc(sizeof(struct dns_packet), 1);
 	packet->header = header;
@@ -373,12 +396,14 @@ void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
 // NOT_TESTED
 int dns_pwrite_question(struct dns_packet *p, const char *domain) {
 	struct dns_question *question = malloc(sizeof(struct dns_question));
+
 	strcpy(question->Name, domain);
 	question->Type  = 1;
 	question->Class = 1;
 
 	p->questions = realloc(p->questions, p->c_questions * sizeof(struct dns_question)); // okay this is actually fucked
 	p->questions[p->c_questions++] = question;
+	p->header.questions++;
  
 	return sizeof *question;
 }
@@ -394,6 +419,7 @@ int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
 
 	p->answers = realloc(p->answers, p->c_answers * sizeof(struct dns_A_record)); // okay this is actually fucked
 	p->answers[p->c_answers++] = record;
+	p->header.answers++;
  
 	return sizeof *record;
 }
@@ -412,7 +438,7 @@ void dns_pprint(struct dns_packet p) {
 }
 
 // NOT_TESTED
-void free_dns_packet(struct dns_packet *p) {
+void dns_free_packet(struct dns_packet *p) {
 	while(p->c_answers-- > 0) free(p->answers[p->c_answers]);
 	free(p->answers);
 	while(p->c_questions -- > 0) free(p->questions[p->c_questions]);

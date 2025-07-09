@@ -37,34 +37,52 @@ void setup_address(struct sockaddr_in *addr, const char *ipv4, uint16_t port) {
 	inet_pton(AF_INET, DNS_IPV4, &addr->sin_addr.s_addr);
 }
 
-int main(int argc, char **argv) {
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s <header>\n", argv[0]);
-		return EXIT_FAILURE;
-	}
+void write_to_file(const char *name, struct dns_buffer *b) {
+	int fd = open(name, O_CREAT | O_WRONLY); 
+	write(fd, b->buf, b->size);
+	close(fd);
+}
 
+int main(int argc, char **argv) {
 	int                sockfd;
 	struct sockaddr_in addr;
-	struct dns_buffer *dns_qbuf, *dns_rbuf;
-	struct dns_packet *dns_qp  , *dns_rp;
 
-	dns_qp = dns_new_packet();
-	dns_pwrite_question(dns_qp, "google.com");
-	dns_ptob(dns_qp, dns_qbuf);
+	struct dns_buffer  dns_qbuf = {0}, dns_rbuf = {0};
+	struct dns_packet  dns_qp   = {0}, dns_rp   = {0};
+
+	struct dns_header header = {0};
+	header.id = 69;
+	header.recursion_desired = true;
+	header.authed_data       = true;
+	dns_qp.header = header;
+	dns_pwrite_question(&dns_qp, "google.com");
+
+	dns_ptob(&dns_qp, &dns_qbuf);
+	printf("converted question packet to buffer\n");
+
+	bzero(&dns_qp, sizeof dns_qp);
+	dns_btop(&dns_qbuf, &dns_qp);
+	dns_pprint(dns_qp);
+
+	write_to_file("duck", &dns_qbuf);
 
 	sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	setup_address(&addr, DNS_IPV4, DNS_PORT);
-	sendto(sockfd, dns_qbuf->buf, dns_qbuf->size, 0, (struct sockaddr*)&addr, sizeof addr);
+
+	sendto(sockfd, dns_qbuf.buf, dns_qbuf.size, 0, (struct sockaddr*)&addr, sizeof addr);
 	printf("sent dns query!\n");
-	dns_rbuf->size = recvfrom(sockfd, dns_rbuf->buf, sizeof(dns_rbuf->buf), 0, NULL, NULL);
+
+	dns_rbuf.size = recvfrom(sockfd, dns_rbuf.buf, sizeof(dns_rbuf.buf), 0, NULL, NULL);
 	printf("received dns response!\n");
+
 	close(sockfd);
 
-	dns_btop(dns_rbuf, dns_rp);
-	dns_pprint(*dns_rp);
+	dns_btop(&dns_rbuf, &dns_rp);
+	printf("created a response packet\n");
+	dns_pprint(dns_rp);
 
-	dns_free_packet(dns_qp);
-	dns_free_packet(dns_rp);
+	dns_free_packet(&dns_qp);
+	dns_free_packet(&dns_rp);
 
 	return EXIT_SUCCESS;
 }
