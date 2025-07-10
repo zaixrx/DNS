@@ -1,5 +1,5 @@
 # Context
-till now this only parses dns queries and responses the next step is to make a stub resolver over UDP transport
+now I have implemented a really basic stub resolvers that works on optimal conditions under my supposition(yes it's a word) writing unit tests and maybe even benchmarks is a clear next step that'll come(insha'allah) after making the next thing which is trivially a DNS server! maybe even mDNS idk(which was the hole purpose of the project anyway)
 
 # Dependencies
 cJSON it's also dynamically linked soo that's a little bit fucked up I'll work on the structure though
