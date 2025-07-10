@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 	header.authed_data       = true;
 	dns_qp.header = header;
 
-	dns_pwrite_question(&dns_qp, "google.com");
+	dns_pwrite_question(&dns_qp, "www.yahoo.com");
 	dns_pprint(dns_qp);
 
 	dns_ptob(&dns_qp, &dns_qbuf);
@@ -72,6 +72,8 @@ int main(int argc, char **argv) {
 	printf("received dns response!\n");
 
 	close(sockfd);
+
+	write_to_file("response", &dns_rbuf);
 
 	dns_btop(&dns_rbuf, &dns_rp);
 	printf("created a response packet\n");

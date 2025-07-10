@@ -269,7 +269,6 @@ int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, i
 	return 1;
 }
 
-// NOT_TESTED
 int dns_write_question(struct dns_buffer *b, struct dns_question *question) {
 	size_t s = write_labels(b, question->Name);
 	writes(b, question->Type);
@@ -277,7 +276,6 @@ int dns_write_question(struct dns_buffer *b, struct dns_question *question) {
 	return s+4;
 }
 
-// NOT_TESTED
 int dns_write_questions(struct dns_buffer *b, struct dns_question **questions, size_t c_questions) {
 	size_t s = 0;
 	while (c_questions-- > 0)
@@ -294,6 +292,7 @@ void dns_print_question(struct dns_question q) {
 	cJSON_Delete(json);
 }
 
+// TODO: support all types of record types and sizes not only A records
 int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int records_count) {
 	while (--records_count >= 0) {
 		struct dns_A_record *record = malloc(sizeof(struct dns_A_record));
@@ -317,14 +316,14 @@ int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int r
 		record->Type   = gets(b);
 		record->Class  = gets(b);
 		record->TTL    = getl(b);
-		/* record->Len */ gets(b); // I think I am supposed to identify the NS record type via it's length
+		
+		int add_size = gets(b); // I think I am supposed to identify the NS record type via it's length
 		record->IPv4   = getl(b);
 	}
 
 	return 0;
 }
 
-// NOT_TESTED
 int dns_write_record(struct dns_buffer *b, struct dns_A_record *record) {
 	size_t s = write_labels(b, record->Name);
 	writes(b, record->Type);
@@ -335,7 +334,6 @@ int dns_write_record(struct dns_buffer *b, struct dns_A_record *record) {
 	return s+18;
 }
 
-// NOT_TESTED
 int dns_write_records(struct dns_buffer *b, struct dns_A_record **records, size_t c_records) {
 	size_t s = 0;
 	while (c_records-- > 0)
@@ -365,7 +363,6 @@ struct dns_packet *dns_new_packet(struct dns_header header) {
 	return packet;
 }
 
-// NOT_TESTED
 void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 	if (dns_parse_header(b, &p->header) < 0) {
 		fprintf(stderr, "could not parse header!\n");
@@ -388,10 +385,25 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 			return;
 		}
 		p->c_answers = p->header.answers;
+
+		p->authorities = malloc(p->header.authoritative_entries * sizeof(struct dns_A_record*));
+		if (dns_parse_records(b, p->authorities, p->header.authoritative_entries) < 0) {
+			fprintf(stderr, "failed to parse A records\n");
+			free   (p->authorities);
+			return;
+		}
+		p->c_authorities = p->header.authoritative_entries;
+
+		p->resources = malloc(p->header.resource_entries * sizeof(struct dns_A_record*));
+		if (dns_parse_records(b, p->resources, p->header.resource_entries) < 0) {
+			fprintf(stderr, "failed to parse A records\n");
+			free   (p->resources);
+			return;
+		}
+		p->c_resources = p->header.resource_entries;
 	}
 }
 
-// NOT_TESTED
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
 	if (dns_write_header(p->header, b) < 0) {
 		fprintf(stderr, "could not parse header!\n");
@@ -410,10 +422,21 @@ void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
 			free   (p->answers);
 			return;
 		}
+
+		if (dns_write_records(b, p->authorities, p->c_authorities) < 0) {
+			fprintf(stderr, "failed to parse A records\n");
+			free   (p->authorities);
+			return;
+		}
+
+		if (dns_write_records(b, p->resources, p->c_resources) < 0) {
+			fprintf(stderr, "failed to parse A records\n");
+			free   (p->resources);
+			return;
+		}
 	}
 }
 
-// NOT_TESTED
 int dns_pwrite_question(struct dns_packet *p, const char *domain) {
 	struct dns_question *question = malloc(sizeof(struct dns_question));
 
@@ -428,8 +451,7 @@ int dns_pwrite_question(struct dns_packet *p, const char *domain) {
 	return sizeof *question;
 }
 
-// NOT_TESTED
-int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
+int dns_pwrite_record(struct dns_packet *p, const char *domain, uint32_t ipv4) {
 	struct dns_A_record *record = malloc(sizeof(struct dns_A_record));
 	strcpy(record->Name, domain);
 	record->Type  = 1;
@@ -444,7 +466,6 @@ int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
 	return sizeof *record;
 }
 
-// NOT_TESTED
 void dns_pprint(struct dns_packet p) {
 	dns_print_header(p.header);
 	while (p.c_questions-- > 0)
@@ -457,7 +478,6 @@ void dns_pprint(struct dns_packet p) {
 		dns_print_record(*p.resources[p.c_resources]);
 }
 
-// NOT_TESTED
 void dns_free_packet(struct dns_packet *p) {
 	while(p->c_answers-- > 0) free(p->answers[p->c_answers]);
 	free(p->answers);
