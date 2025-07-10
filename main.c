@@ -9,7 +9,7 @@
 
 #include "dnsutils.h"
 
-#define DNS_IPV4 "8.8.8.8"
+#define DNS_IPV4 "1.1.1.1"
 #define DNS_PORT 53
 
 int read_file(const char *path, char *buf) {
@@ -44,6 +44,11 @@ void write_to_file(const char *name, struct dns_buffer *b) {
 }
 
 int main(int argc, char **argv) {
+	if (argc != 2) {
+		fprintf(stderr, "Usage: %s <domain>\n", argv[0]);
+		return EXIT_FAILURE;
+	}
+
 	int                sockfd;
 	struct sockaddr_in addr;
 
@@ -56,7 +61,7 @@ int main(int argc, char **argv) {
 	header.authed_data       = true;
 	dns_qp.header = header;
 
-	dns_pwrite_question(&dns_qp, "www.yahoo.com");
+	dns_pwrite_question(&dns_qp, argv[1]);
 	dns_pprint(dns_qp);
 
 	dns_ptob(&dns_qp, &dns_qbuf);

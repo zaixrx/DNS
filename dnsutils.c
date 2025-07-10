@@ -54,7 +54,7 @@ static inline uint16_t gets(struct dns_buffer *b) {
 	return val;
 }
 
-static inline uint16_t getl(struct dns_buffer *b) {
+static inline uint32_t getl(struct dns_buffer *b) {
 	uint32_t val = ntohl(*(uint32_t*)(b->buf+b->pos)); b->pos += 4;
 	return val;
 }
@@ -323,7 +323,11 @@ int dns_parse_records(struct dns_buffer *b, struct dns_record **records, int rec
 		int d_size = gets(b); // I think I am supposed to identify the NS record type via it's length
 		
 		switch (record->Type) {
-			case RT_A: { record->RD.A.IPv4 = getl(b); } break;
+			case RT_A: {
+				printf("%d\n", b->pos);
+				getr(b, &record->RD.A.IPv4, d_size);
+				printf("%d\n", record->RD.A.IPv4);
+			} break;
 			case RT_NS: {
 				parse_labels(b, record->RD.NS.Host);
 			} break;
