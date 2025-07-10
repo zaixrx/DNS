@@ -1,12 +1,15 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <netinet/in.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
 
 #define BUFF_SIZE 512
 #define NAME_SIZE 64
 #define HEADER_SIZE 12
+
+// RFC pages refer to Record as RR(Resource Record)
 
 struct dns_buffer {
 	char buf[BUFF_SIZE];
@@ -49,38 +52,61 @@ struct dns_question {
 	uint16_t Class;
 };
 
-struct dns_record {
-	char     Name[NAME_SIZE];
-	uint16_t Type;
-	uint16_t Class;
-	uint32_t TTL;
-	uint16_t Len;
-	char     D[];
-};
+typedef enum {
+	RT_UNKNOWN,
+	RT_A,
+	RT_NS,
+	RT_CNAME = 5,
+	RT_MX = 15,
+	RT_AAAA = 28,
+} RecordType;
 
-struct dns_A_record {
-	char     Name[NAME_SIZE];
-	uint16_t Type;
-	uint16_t Class;
-	uint32_t TTL;
-	uint32_t IPv4;
+typedef enum {
+	RC_UNKNOWN,
+	RC_IN,
+} RecordClass;
+
+struct dns_record {
+	char        Name[NAME_SIZE];
+	RecordType  Type;
+	RecordClass Class;
+	uint32_t    TTL;
+	uint16_t    RDLENGTH;	
+	union {
+		struct {
+			in_addr_t IPv4;
+		} A;
+		struct {
+			char Host[NAME_SIZE];
+		} NS;
+		struct {
+			char Host[NAME_SIZE];
+		} CNAME;
+		struct {
+			uint16_t Priority;
+			char Host[NAME_SIZE];
+		} MX;
+		struct {
+			uint8_t IPv6[16];
+		} AAAA;
+	} RD;
 };
 
 struct dns_packet {
 	struct dns_header     header;
 	struct dns_question **questions;
 	size_t c_questions;
-	struct dns_A_record   **answers;
+	struct dns_record   **answers;
 	size_t c_answers;
-	struct dns_A_record   **authorities;
+	struct dns_record   **authorities;
 	size_t c_authorities;
-	struct dns_A_record   **resources;
+	struct dns_record   **resources;
 	size_t c_resources;
 };
 
 void dns_print_header  (struct dns_header     header);
 void dns_print_question(struct dns_question question);
-void dns_print_record  (struct dns_A_record   record);
+void dns_print_record  (struct dns_record   record);
 void dns_print_packet  (struct dns_packet packet);
 
 struct dns_packet *dns_new_packet(struct dns_header header);

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <strings.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -58,9 +59,9 @@ static inline uint16_t getl(struct dns_buffer *b) {
 	return val;
 }
 
-static inline void getr(struct dns_buffer *b, char *d, uint8_t d_size) {
-	if  (b->pos + d_size >= BUFF_SIZE) return;
-	memcpy(d, b->buf+b->pos, d_size);
+static inline void getr(struct dns_buffer *b, void *d, uint8_t d_size) {
+	if (b->pos + d_size >= BUFF_SIZE) return;
+	if (d) memcpy(d, b->buf+b->pos, d_size);
 	b->pos += d_size;
 }
 
@@ -88,23 +89,26 @@ static inline void writel(struct dns_buffer *b, uint32_t d) {
 }
 */
 
-static inline void writes(struct dns_buffer *b, uint16_t d) {
-	if (b->size + 2 >= BUFF_SIZE) return;
+static inline int writes(struct dns_buffer *b, uint16_t d) {
+	if (b->size + 2 >= BUFF_SIZE) return -1;
 	*(uint16_t*)(b->buf+b->size) = htons(d);
 	b->size += 2;
+	return 2;
 }
 
-static inline void writel(struct dns_buffer *b, uint32_t d) {
-	if (b->size + 4 >= BUFF_SIZE) return;
+static inline int writel(struct dns_buffer *b, uint32_t d) {
+	if (b->size + 4 >= BUFF_SIZE) return -1;
 	*(uint32_t*)(b->buf+b->size) = htonl(d);
 	b->size += 4;
+	return 4;
 }
 
 // write range
-static inline void writer(struct dns_buffer *b, const char *d, size_t d_size) {
-	if (b->size + d_size >= BUFF_SIZE) return;
+static inline int writer(struct dns_buffer *b, const void *d, size_t d_size) {
+	if (b->size + d_size >= BUFF_SIZE) return -1;
 	memcpy(b->buf + b->size, d, d_size);
 	b->size += d_size;
+	return d_size;
 }
 
 uint32_t parse_labels(struct dns_buffer *b, char *name) {
@@ -151,7 +155,7 @@ int write_labels(struct dns_buffer *b, const char *domain) {
 	while ((lsize = next_label(domain, label, &offset)) != EOF) {
 		writeb(b, lsize);
 		writer(b, label, lsize);
-		size += lsize+1;
+		size += lsize + 1;
 	}
 
 	writeb(b, '\0');
@@ -241,7 +245,6 @@ void dns_print_header(struct dns_header h) {
 }
 
 int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, int questions_count) {
-
 	while (questions_count-- > 0) {
 		struct dns_question *question = malloc(sizeof(struct dns_question));
 		questions[questions_count] = question;
@@ -271,9 +274,9 @@ int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, i
 
 int dns_write_question(struct dns_buffer *b, struct dns_question *question) {
 	size_t s = write_labels(b, question->Name);
-	writes(b, question->Type);
-	writes(b, question->Class);
-	return s+4;
+	s += writes(b, question->Type);
+	s += writes(b, question->Class);
+	return s;
 }
 
 int dns_write_questions(struct dns_buffer *b, struct dns_question **questions, size_t c_questions) {
@@ -293,9 +296,9 @@ void dns_print_question(struct dns_question q) {
 }
 
 // TODO: support all types of record types and sizes not only A records
-int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int records_count) {
+int dns_parse_records(struct dns_buffer *b, struct dns_record **records, int records_count) {
 	while (--records_count >= 0) {
-		struct dns_A_record *record = malloc(sizeof(struct dns_A_record));
+		struct dns_record *record = malloc(sizeof(struct dns_record));
 		records[records_count] = record;
 
 		bool must_return = false;
@@ -317,43 +320,121 @@ int dns_parse_records(struct dns_buffer *b, struct dns_A_record **records, int r
 		record->Class  = gets(b);
 		record->TTL    = getl(b);
 		
-		int add_size = gets(b); // I think I am supposed to identify the NS record type via it's length
-		record->IPv4   = getl(b);
+		int d_size = gets(b); // I think I am supposed to identify the NS record type via it's length
+		
+		switch (record->Type) {
+			case RT_A: { record->RD.A.IPv4 = getl(b); } break;
+			case RT_NS: {
+				parse_labels(b, record->RD.NS.Host);
+			} break;
+			case RT_CNAME: {
+				parse_labels(b, record->RD.CNAME.Host);
+			} break;
+			case RT_MX: {
+				record->RD.MX.Priority = gets(b);
+				parse_labels(b, record->RD.CNAME.Host);
+			} break;
+			case RT_AAAA: {
+				getr(b, record->RD.AAAA.IPv6, sizeof record->RD.AAAA.IPv6);
+			} break;
+			default: { getr(b, NULL, d_size); } break;
+		}
 	}
 
 	return 0;
 }
 
-int dns_write_record(struct dns_buffer *b, struct dns_A_record *record) {
+int dns_write_record(struct dns_record *record, struct dns_buffer *b) {
 	size_t s = write_labels(b, record->Name);
-	writes(b, record->Type);
-	writes(b, record->Class);
-	writel(b, record->TTL);
-	writes(b, sizeof record->IPv4);
-	writel(b, record->IPv4);
-	return s+18;
-}
+	s += writes(b, record->Type);
+	s += writes(b, record->Class);
+	s += writel(b, record->TTL);
 
-int dns_write_records(struct dns_buffer *b, struct dns_A_record **records, size_t c_records) {
-	size_t s = 0;
-	while (c_records-- > 0)
-		s += dns_write_record(b, records[c_records]);
+	int rlen = 0; bool ret = false;
+
+	switch (record->Type) {
+		case RT_A: {
+			s += writes(b, sizeof record->RD.A.IPv4);
+			s += writel(b, record->RD.A.IPv4);
+		} break;
+		case RT_NS: {
+			ret = true;
+			s += writes(b, 0); // reserve storage
+			s += rlen = write_labels(b, record->RD.NS.Host);
+		} break;
+		case RT_CNAME: {
+			ret = true;
+			s += writes(b, 0); // reserve storage
+			s += rlen = write_labels(b, record->RD.CNAME.Host);	
+		} break;
+		case RT_MX: {
+			ret = true;
+			s += writes(b, 0); // reserve storage
+			s += rlen  = writes(b, record->RD.MX.Priority);
+			s += rlen += write_labels(b, record->RD.CNAME.Host);
+		} break;
+		case RT_AAAA: {
+			uint16_t size = sizeof record->RD.AAAA.IPv6;
+			writes(b, size);
+			writer(b, record->RD.AAAA.IPv6, size);
+		} break;
+		default: { /* TODO: do some error handeling */ } break;
+	}
+
+	if (ret) {
+		b->pos -= rlen + 2;
+		writes(b, rlen); // it'll overwrite old data
+		b->pos += rlen + 2;
+	}
+
 	return s;
 }
 
-void dns_print_record(struct dns_A_record record) {
+int dns_write_records(struct dns_buffer *b, struct dns_record **records, size_t c_records) {
+	size_t s = 0;
+	while (c_records-- > 0) s += dns_write_record(records[c_records], b);
+	return s;
+}
+
+void dns_print_record(struct dns_record record) {
 	cJSON *json = cJSON_CreateObject();
-
-	char ipv4[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &record.IPv4, ipv4, sizeof ipv4);
-
+	
 	cJSON_AddStringToObject(json, "Name", record.Name);
-	cJSON_AddStringToObject(json, "IPv4", ipv4);
-	cJSON_AddNumberToObject(json, "Type", record.Type);
+	switch (record.Type) {
+		case RT_A: {
+			char ipv4[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, &record.RD.A.IPv4, ipv4, sizeof ipv4);
+			cJSON_AddStringToObject(json, "IPv4", ipv4);
+			cJSON_AddStringToObject(json, "Type", "A");
+		} break;
+		case RT_NS: {
+			cJSON_AddStringToObject(json, "Host", record.RD.NS.Host);
+			cJSON_AddStringToObject(json, "Type", "NS");
+		} break;
+		case RT_CNAME: {
+			cJSON_AddStringToObject(json, "Host", record.RD.CNAME.Host);
+			cJSON_AddStringToObject(json, "Type", "CNAME");
+		} break;
+		case RT_MX: {
+			cJSON_AddNumberToObject(json, "Priority", record.RD.MX.Priority);
+			cJSON_AddStringToObject(json, "Host", record.RD.MX.Host);
+			cJSON_AddStringToObject(json, "Type", "MX");
+		} break;
+		case RT_AAAA: {
+			char ipv6[INET6_ADDRSTRLEN];
+			inet_ntop(AF_INET6, &record.RD.AAAA.IPv6, ipv6, sizeof ipv6);
+			cJSON_AddStringToObject(json, "IPv6", ipv6);
+			cJSON_AddStringToObject(json, "Type", "AAAA");
+		} break;
+		default: {
+			cJSON_AddStringToObject(json, "Type", "Unknown");
+		} break;
+	}
 	cJSON_AddNumberToObject(json, "Class", record.Class);
 	cJSON_AddNumberToObject(json, "TTL", record.TTL);
 
-	printf("A: %s\n", cJSON_Print(json));
+	printf("Record: %s\n", cJSON_Print(json));
+
 	cJSON_Delete(json);
 }
 
@@ -451,15 +532,15 @@ int dns_pwrite_question(struct dns_packet *p, const char *domain) {
 	return sizeof *question;
 }
 
-int dns_pwrite_record(struct dns_packet *p, const char *domain, uint32_t ipv4) {
-	struct dns_A_record *record = malloc(sizeof(struct dns_A_record));
+int dns_pwrite_A_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
+	struct dns_record *record = malloc(sizeof(struct dns_record));
 	strcpy(record->Name, domain);
 	record->Type  = 1;
 	record->Class = 1;
 	record->TTL   = 69;
-	record->IPv4  = ipv4;
+	record->RD.A.IPv4  = ipv4;
 
-	p->answers = realloc(p->answers, p->c_answers * sizeof(struct dns_A_record)); // okay this is actually fucked
+	p->answers = realloc(p->answers, p->c_answers * sizeof(struct dns_record)); // okay this is actually fucked
 	p->answers[p->c_answers++] = record;
 	p->header.answers++;
  
