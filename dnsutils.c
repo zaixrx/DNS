@@ -324,9 +324,7 @@ int dns_parse_records(struct dns_buffer *b, struct dns_record **records, int rec
 		
 		switch (record->Type) {
 			case RT_A: {
-				printf("%d\n", b->pos);
 				getr(b, &record->RD.A.IPv4, d_size);
-				printf("%d\n", record->RD.A.IPv4);
 			} break;
 			case RT_NS: {
 				parse_labels(b, record->RD.NS.Host);
