@@ -97,6 +97,16 @@ int table_remove(HashTable *ht, const char *domain_name) {
 	return HTABLE_ERR;
 }
 
-void table_free(HashTable *ht) { /* Do it later */ }
+void table_free(HashTable *ht) {
+	for (int i = 0; i < sizeof ht->entries; i++) {
+		struct table_entry *ptr = ht->entries[i];
+		while (ptr) {
+			void *temp = ptr;
+			ptr = ptr->next;
+			free(ptr);
+		}
+		ht->entries[i] = null;
+	}
+}
 
 #endif
