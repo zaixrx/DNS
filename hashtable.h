@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <netinet/in.h>
 
-#define HTABLE_VLA_CAP 10 
+#define HTABLE_CAP 10 
 #define HTABLE_ERR -1
 #define HTABLE_SUCC 0
 
@@ -21,12 +21,10 @@ struct table_entry {
 };
 
 typedef struct {
-	size_t length;
-	struct table_entry *entries[HTABLE_VLA_CAP];
+	struct table_entry *entries[HTABLE_CAP];
 } HashTable;
 
-uint32_t table_hash(HashTable*, const char*);
-void table_append(HashTable*, const char*, struct table_entry);
+void table_append(HashTable*, struct table_entry_data);
 struct table_entry *table_lookup(HashTable*, const char*);
 int table_remove(HashTable*, const char*);
 void table_free(HashTable*);
@@ -39,7 +37,7 @@ void table_free(HashTable*);
 #include <string.h>
 
 // key max size is 32 chars!
-uint32_t table_hash(HashTable *ht, const char *key) {
+uint32_t hash(const char *key) {
 	if (!key) return HTABLE_ERR;
 	int result = 0;
 	while (*key != '\0') result += *key++;
@@ -52,7 +50,7 @@ void table_append(HashTable *ht, struct table_entry_data entry_data) {
 	hte->next = NULL;
 	hte->data = entry_data;
 
-	int index = table_hash(ht, entry_data.domain_name);
+	int index = hash(entry_data.domain_name) % HTABLE_CAP;
 
 	if (ht->entries[index] == NULL) { ht->entries[index] = hte; return; }
 	
@@ -62,7 +60,7 @@ void table_append(HashTable *ht, struct table_entry_data entry_data) {
 }
 
 struct table_entry *table_lookup(HashTable *ht, const char *domain_name) {
-	int index = table_hash(ht, domain_name);
+	int index = hash(domain_name);
 	if (ht->entries[index] == NULL) return NULL;
 	for (struct table_entry *te = ht->entries[index]; te; te = te->next)
 		if (strcmp(te->data.domain_name, domain_name) == 0) return te;
@@ -70,7 +68,7 @@ struct table_entry *table_lookup(HashTable *ht, const char *domain_name) {
 }
 
 int table_remove(HashTable *ht, const char *domain_name) {
-	int index = table_hash(ht, domain_name);
+	int index = hash(domain_name);
 	if (ht->entries[index] == NULL) return HTABLE_ERR;
 	
 	// find it's index in the linked list
@@ -98,14 +96,14 @@ int table_remove(HashTable *ht, const char *domain_name) {
 }
 
 void table_free(HashTable *ht) {
-	for (int i = 0; i < sizeof ht->entries; i++) {
+	for (int i = 0; i < HTABLE_CAP; i++) {
 		struct table_entry *ptr = ht->entries[i];
 		while (ptr) {
 			void *temp = ptr;
 			ptr = ptr->next;
-			free(ptr);
+			free(temp);
 		}
-		ht->entries[i] = null;
+		ht->entries[i] = NULL;
 	}
 }
 

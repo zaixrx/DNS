@@ -59,17 +59,17 @@ typedef enum {
 	RT_CNAME = 5,
 	RT_MX = 15,
 	RT_AAAA = 28,
-} RecordType;
+} DNSRType;
 
 typedef enum {
 	RC_UNKNOWN,
 	RC_IN,
-} RecordClass;
+} DNSRClass;
 
 struct dns_record {
 	char        Name[NAME_SIZE];
-	RecordType  Type;
-	RecordClass Class;
+	DNSRType    Type;
+	DNSRClass   Class;
 	uint32_t    TTL;
 	uint16_t    RDLENGTH;	
 	union {
@@ -104,10 +104,10 @@ struct dns_packet {
 	size_t c_resources;
 };
 
-void dns_print_header  (struct dns_header     header);
+void dns_print_header(struct dns_header     header);
 void dns_print_question(struct dns_question question);
-void dns_print_record  (struct dns_record   record);
-void dns_print_packet  (struct dns_packet packet);
+void dns_print_record(struct dns_record   record);
+void dns_print_packet(struct dns_packet packet);
 
 struct dns_packet *dns_new_packet(struct dns_header header);
 void dns_free_packet(struct dns_packet *p);
@@ -117,8 +117,8 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p);
 // dns_packet to dns_buffer, you have the responsibilty of managing memory
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b);
 
-int dns_pwrite_question(struct dns_packet *p, const char *domain);
-int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4);
-void dns_pprint         (struct dns_packet p);
+int  dns_pwrite_question(struct dns_packet *p, const char *domain);
+int  dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4);
+void dns_pprint(struct dns_packet p);
 
 #endif

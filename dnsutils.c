@@ -75,20 +75,6 @@ static inline void writeb(struct dns_buffer *b, uint8_t d) {
 	b->size += 1;
 }
 
-/*
-static inline void writes(struct dns_buffer *b, uint16_t d) {
-	writeb(b, (uint8_t)(d >> 0  & 0xFF));
-	writeb(b, (uint8_t)(d >> 8  & 0xFF));
-}
-
-static inline void writel(struct dns_buffer *b, uint32_t d) {
-	writeb(b, (uint8_t)(d >> 0  & 0xFF));
-	writeb(b, (uint8_t)(d >> 8  & 0xFF));
-	writeb(b, (uint8_t)(d >> 16 & 0xFF));
-	writeb(b, (uint8_t)(d >> 24 & 0xFF));
-}
-*/
-
 static inline int writes(struct dns_buffer *b, uint16_t d) {
 	if (b->size + 2 >= BUFF_SIZE) return -1;
 	*(uint16_t*)(b->buf+b->size) = htons(d);
@@ -116,25 +102,34 @@ uint32_t parse_labels(struct dns_buffer *b, char *name) {
 	uint16_t buffer_size = 1, name_size = 0;
 	char     label[64];
 
-	while (label_size  > 0) {
-		getr(b, label, label_size);
-		next_len = getb(b);
+	while (label_size > 0) {
+		// the next byte is the index
+		if ((label_size & 0xC0) == 0xC0) {
+			int org_pos = b->pos + 1;
+			b->pos  = (label_size ^ 0xC0) << 8 | getb(b);
+			parse_labels(b, label);
+			b->pos = org_pos;
+			label_size = strlen(label)+1;
+			memcpy(name + name_size, label, label_size);
+			label_size = 0;
+			buffer_size += 2;
+		} else {
+			getr(b, label, label_size);
+			next_len = getb(b);
+			label[label_size++] = next_len > 0 ? '.' : '\0';
+			buffer_size += label_size + 1;
+			memcpy(name + name_size, label, label_size);
+			name_size += label_size;
+			label_size = next_len;
+		}
 
-		buffer_size += label_size + 1;
-		label[label_size++] = next_len > 0 ? '.' : '\0';
-
-		memcpy(name + name_size, label, label_size);
-		name_size += label_size;
-
-		label_size = next_len;
 	}
 
 	return buffer_size;
 }
 
 int next_label(const char *domain, char *label, int *offset) {
-	int    label_size = 0;
-
+	int label_size = 0;
 	const char *buf = domain + *offset;
 
 	while (buf[label_size] != '.' && buf[label_size] != '\0') { label_size++; }
@@ -168,7 +163,6 @@ int dns_parse_header(struct dns_buffer *b, struct dns_header *out) {
 	out->id = gets(b);
 
 	uint16_t flags = gets(b);
-
 	uint8_t  first = flags & 0xFF;
 	uint8_t second = flags >> 8;
 
@@ -213,6 +207,7 @@ int dns_write_header(struct dns_header h, struct dns_buffer *b) {
 	writes(b, h.answers);
 	writes(b, h.authoritative_entries);
 	writes(b, h.resource_entries);
+
 	return 0;
 }
 
@@ -244,32 +239,18 @@ void dns_print_header(struct dns_header h) {
 	cJSON_Delete(json);
 }
 
-int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, int questions_count) {
-	while (questions_count-- > 0) {
+int dns_parse_questions(struct dns_buffer *p, struct dns_question **questions, size_t questions_count) {
+	while (questions_count > 0) {
 		struct dns_question *question = malloc(sizeof(struct dns_question));
-		questions[questions_count] = question;
-
-		bool must_return = false;
-		int  org_pos     = 0; // meant for referencing
-
-		// the next byte is the index
-		if (seekb(p) == 0xC0) {
-			p->pos++;
-			int target_index = getb(p);
-			org_pos          = p->pos;
-			p->pos      	 = target_index;
-			must_return 	 = true;
-		} 
+		questions[--questions_count] = question;
 
 		parse_labels(p, question->Name);
-
-		p->pos = must_return ? org_pos : p->pos;
 
 		question->Type   = gets(p);
 		question->Class  = gets(p);
 	}	
 
-	return 1;
+	return 0;
 }
 
 int dns_write_question(struct dns_buffer *b, struct dns_question *question) {
@@ -281,8 +262,7 @@ int dns_write_question(struct dns_buffer *b, struct dns_question *question) {
 
 int dns_write_questions(struct dns_buffer *b, struct dns_question **questions, size_t c_questions) {
 	size_t s = 0;
-	while (c_questions-- > 0)
-		s += dns_write_question(b, questions[c_questions]);
+	while (c_questions > 0) s += dns_write_question(b, questions[--c_questions]);
 	return s;
 }
 
@@ -295,36 +275,22 @@ void dns_print_question(struct dns_question q) {
 	cJSON_Delete(json);
 }
 
-// TODO: support all types of record types and sizes not only A records
-int dns_parse_records(struct dns_buffer *b, struct dns_record **records, int records_count) {
-	while (--records_count >= 0) {
+int dns_parse_records(struct dns_buffer *b, struct dns_record **records, size_t records_count) {
+	while (records_count > 0) {
 		struct dns_record *record = malloc(sizeof(struct dns_record));
-		records[records_count] = record;
-
-		bool must_return = false;
-		int  org_pos     = 0; // meant for referencing
-
-		// the next byte is the index
-		if (seekb(b) == 0xC0) {
-			b->pos++;
-			int target_index = getb(b);
-			org_pos          = b->pos;
-			b->pos      	 = target_index;
-			must_return 	 = true;
-		} 
+		records[--records_count] = record;
 
 		int size = parse_labels(b, record->Name);
-		b->pos = must_return ? org_pos : b->pos;
 
 		record->Type   = gets(b);
 		record->Class  = gets(b);
 		record->TTL    = getl(b);
 		
-		int d_size = gets(b); // I think I am supposed to identify the NS record type via it's length
+		int rd_size = gets(b);
 		
 		switch (record->Type) {
 			case RT_A: {
-				getr(b, &record->RD.A.IPv4, d_size);
+				getr(b, &record->RD.A.IPv4, rd_size);
 			} break;
 			case RT_NS: {
 				parse_labels(b, record->RD.NS.Host);
@@ -339,7 +305,7 @@ int dns_parse_records(struct dns_buffer *b, struct dns_record **records, int rec
 			case RT_AAAA: {
 				getr(b, record->RD.AAAA.IPv6, sizeof record->RD.AAAA.IPv6);
 			} break;
-			default: { getr(b, NULL, d_size); } break;
+			default: { getr(b, NULL, rd_size); } break;
 		}
 	}
 
@@ -394,7 +360,7 @@ int dns_write_record(struct dns_record *record, struct dns_buffer *b) {
 
 int dns_write_records(struct dns_buffer *b, struct dns_record **records, size_t c_records) {
 	size_t s = 0;
-	while (c_records-- > 0) s += dns_write_record(records[c_records], b);
+	while (c_records > 0) s += dns_write_record(records[--c_records], b);
 	return s;
 }
 
@@ -452,32 +418,39 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 		return;
 	}
 
-	p->questions = malloc(p->header.questions * sizeof(struct dns_question*));
-	if (dns_parse_questions(b, p->questions, p->header.questions) < 0) {
-		fprintf(stderr, "failed to parse questions\n");
-		free(p->questions);
-		return;
+	if (p->header.questions > 0) {
+		p->questions = malloc(p->header.questions * sizeof(struct dns_question*));
+		if (dns_parse_questions(b, p->questions, p->header.questions) < 0) {
+			fprintf(stderr, "failed to parse questions\n");
+			free(p->questions);
+			return;
+		}
+		p->c_questions = p->header.questions;
 	}
-	p->c_questions = p->header.questions;
 
-	if (p->header.response) {
-		p->answers = malloc(p->header.answers * sizeof(struct dns_A_record*));
+	if (p->header.answers > 0) {
+		p->answers = malloc(p->header.answers * sizeof(struct dns_record*));
 		if (dns_parse_records(b, p->answers, p->header.answers) < 0) {
 			fprintf(stderr, "failed to parse A records\n");
 			free   (p->answers);
 			return;
 		}
 		p->c_answers = p->header.answers;
+	}
 
-		p->authorities = malloc(p->header.authoritative_entries * sizeof(struct dns_A_record*));
+        if (p->header.authoritative_entries > 0) {
+		p->authorities = malloc(p->header.authoritative_entries * sizeof(struct dns_record*));
 		if (dns_parse_records(b, p->authorities, p->header.authoritative_entries) < 0) {
 			fprintf(stderr, "failed to parse A records\n");
 			free   (p->authorities);
 			return;
 		}
 		p->c_authorities = p->header.authoritative_entries;
+	}
 
-		p->resources = malloc(p->header.resource_entries * sizeof(struct dns_A_record*));
+	if (p->header.resource_entries > 0) {
+		p->resources = malloc(p->header.resource_entries * sizeof(struct dns_record*));
+		printf("got %d resources fuckerr!!!!\n", p->header.resource_entries);
 		if (dns_parse_records(b, p->resources, p->header.resource_entries) < 0) {
 			fprintf(stderr, "failed to parse A records\n");
 			free   (p->resources);
@@ -499,24 +472,22 @@ void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
 		return;
 	}
 
-	if (p->header.response) {
-		if (dns_write_records(b, p->answers, p->c_answers) < 0) {
-			fprintf(stderr, "failed to parse A records\n");
-			free   (p->answers);
-			return;
-		}
+	if (dns_write_records(b, p->answers, p->c_answers) < 0) {
+		fprintf(stderr, "failed to parse A records\n");
+		free   (p->answers);
+		return;
+	}
 
-		if (dns_write_records(b, p->authorities, p->c_authorities) < 0) {
-			fprintf(stderr, "failed to parse A records\n");
-			free   (p->authorities);
-			return;
-		}
+	if (dns_write_records(b, p->authorities, p->c_authorities) < 0) {
+		fprintf(stderr, "failed to parse A records\n");
+		free   (p->authorities);
+		return;
+	}
 
-		if (dns_write_records(b, p->resources, p->c_resources) < 0) {
-			fprintf(stderr, "failed to parse A records\n");
-			free   (p->resources);
-			return;
-		}
+	if (dns_write_records(b, p->resources, p->c_resources) < 0) {
+		fprintf(stderr, "failed to parse A records\n");
+		free   (p->resources);
+		return;
 	}
 }
 
@@ -551,23 +522,24 @@ int dns_pwrite_A_answer(struct dns_packet *p, const char *domain, uint32_t ipv4)
 
 void dns_pprint(struct dns_packet p) {
 	dns_print_header(p.header);
-	while (p.c_questions-- > 0)
-		dns_print_question(*p.questions[p.c_questions]);
-	while (p.c_answers-- > 0)
-		dns_print_record(*p.answers[p.c_answers]);
-	while (p.c_authorities-- > 0)
-		dns_print_record(*p.authorities[p.c_authorities]);
-	while (p.c_resources-- > 0)
-		dns_print_record(*p.resources[p.c_resources]);
+	while (p.c_questions > 0)
+		dns_print_question(*p.questions[--p.c_questions]);
+	while (p.c_answers > 0)
+		dns_print_record(*p.answers[--p.c_answers]);
+	while (p.c_authorities > 0)
+		dns_print_record(*p.authorities[--p.c_authorities]);
+	printf("%ld\n", p.c_resources);
+	while (p.c_resources > 0)
+		dns_print_record(*p.resources[--p.c_resources]);
 }
 
 void dns_free_packet(struct dns_packet *p) {
-	while(p->c_answers-- > 0) free(p->answers[p->c_answers]);
+	while(p->c_answers > 0) free(p->answers[--p->c_answers]);
 	free(p->answers);
-	while(p->c_questions -- > 0) free(p->questions[p->c_questions]);
+	while(p->c_questions > 0) free(p->questions[--p->c_questions]);
 	free(p->questions);
-	while(p->c_authorities-- > 0) free(p->authorities[p->c_authorities]);
+	while(p->c_authorities > 0) free(p->authorities[--p->c_authorities]);
 	free(p->authorities);
-	while(p->c_resources-- > 0) free(p->resources[p->c_resources]);
+	while(p->c_resources > 0) free(p->resources[--p->c_resources]);
 	free(p->resources);
 }
