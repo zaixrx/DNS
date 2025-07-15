@@ -68,7 +68,7 @@ static inline void entry_presentation() {
 
 void write_file(const char *filepath, struct dns_buffer *buf) {
 	FILE *fp;
-	fp = fopen("test.txt", "w+");
+	fp = fopen(filepath, "w+");
 	fwrite(buf->buf, buf->size, 1, fp);
 	fclose(fp);
 }
@@ -137,7 +137,7 @@ int main(void) {
 			printf("Got response from root server\n");
 
 			printf("Piping response content to ./root_response.txt\n");
-			write_file("root_response.txt", &buf_view);
+			write_file("./metadata/root_response.txt", &buf_view);
 
 			dns_btop(&buf_view, &packet);
 			dns_pprint(packet);
