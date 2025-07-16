@@ -9,4 +9,5 @@ cJSON it's also dynamically linked soo that's a little bit fucked up I'll work o
 - Beej's Guide to Network Programming (Book): https://beej.us/guide/bgnet/pdf/bgnet_usl_c_1.pdf
 - The C Programming Language (Book)
 - 21 Century C (Book)
-- RFC1035: https://www.rfc-editor.org/rfc/pdfrfc/rfc1035.txt.pdf
+- RFC-1034: https://www.rfc-editor.org/rfc/pdfrfc/rfc1034.txt.pdf
+- RFC-1035: https://www.rfc-editor.org/rfc/pdfrfc/rfc1035.txt.pdf

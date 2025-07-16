@@ -24,21 +24,28 @@ typedef enum {
     NXDOMAIN = 3,
     NOTIMP = 4,
     REFUSED = 5,
-} ResultCode;
+} DNSRESCode;
 
 struct dns_header {
 	uint16_t id;
 
+	// START::FLAGS
+	// set by both
+    	bool response;
+    	uint8_t opcode;
+    	bool z; // nothing unset
+
+	// set by the client
     	bool recursion_desired;
+    	bool checking_disabled; // disable DNSSEC
+
+	// set by the server
     	bool truncated_message;
     	bool authoritative_answer;
-    	uint8_t opcode;
-    	bool response;
-	ResultCode rescode;
-    	bool checking_disabled;
-    	bool authed_data;
-    	bool z;
     	bool recursion_available;
+	DNSRESCode rescode;
+    	bool authed_data;
+	// END::FLAGS
 
     	uint16_t questions;
     	uint16_t answers;
@@ -66,30 +73,32 @@ typedef enum {
 	RC_IN,
 } DNSRClass;
 
+union DNSRData {
+	struct {
+		in_addr_t IPv4;
+	} A;
+	struct {
+		char Host[NAME_SIZE];
+	} NS;
+	struct {
+		char Host[NAME_SIZE];
+	} CNAME;
+	struct {
+		uint16_t Priority;
+		char Host[NAME_SIZE];
+	} MX;
+	struct {
+		uint8_t IPv6[16];
+	} AAAA;
+};
+
 struct dns_record {
 	char        Name[NAME_SIZE];
 	DNSRType    Type;
 	DNSRClass   Class;
 	uint32_t    TTL;
 	uint16_t    RDLENGTH;	
-	union {
-		struct {
-			in_addr_t IPv4;
-		} A;
-		struct {
-			char Host[NAME_SIZE];
-		} NS;
-		struct {
-			char Host[NAME_SIZE];
-		} CNAME;
-		struct {
-			uint16_t Priority;
-			char Host[NAME_SIZE];
-		} MX;
-		struct {
-			uint8_t IPv6[16];
-		} AAAA;
-	} RD;
+	union DNSRData RD;
 };
 
 struct dns_packet {
@@ -117,7 +126,7 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p);
 // dns_packet to dns_buffer, you have the responsibilty of managing memory
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b);
 
-int  dns_pwrite_question(struct dns_packet *p, const char *domain);
+int  dns_pwrite_question(struct dns_packet *p, struct dns_question q);
 int  dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4);
 void dns_pprint(struct dns_packet p);
 

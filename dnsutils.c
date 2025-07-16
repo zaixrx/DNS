@@ -166,7 +166,7 @@ int dns_parse_header(struct dns_buffer *b, struct dns_header *out) {
 	uint8_t  first = flags & 0xFF;
 	uint8_t second = flags >> 8;
 
-	out->rescode             = (ResultCode)(flags & 0xF);
+	out->rescode             = (DNSRESCode)(flags & 0xF);
         out->checking_disabled   = first & (1 << 4);
         out->authed_data         = first & (1 << 5);
 	out->z        	         = first & (1 << 6);
@@ -278,7 +278,6 @@ void dns_print_question(struct dns_question q) {
 int dns_parse_records(struct dns_buffer *b, struct dns_record **records, size_t records_count) {
 	unsigned int i = 0;
 	while (i < records_count) {
-		printf("%u/%lu: at pos %u\n", i, records_count, b->pos);
 		struct dns_record *record = malloc(sizeof(struct dns_record));
 		records[i++] = record;
 
@@ -409,12 +408,6 @@ void dns_print_record(struct dns_record record) {
 	cJSON_Delete(json);
 }
 
-struct dns_packet *dns_new_packet(struct dns_header header) {
-	struct dns_packet *packet = calloc(sizeof(struct dns_packet), 1);
-	packet->header = header;
-	return packet;
-}
-
 void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 	memset(p, 0, sizeof *p);
 
@@ -455,16 +448,14 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 
 	if (p->header.resource_entries > 0) {
 		p->resources = malloc(p->header.resource_entries * sizeof(struct dns_record*));
-		printf("got %d resources fuckerr!!!!\n", p->header.resource_entries);
 		if (dns_parse_records(b, p->resources, p->header.resource_entries) < 0) {
 			fprintf(stderr, "failed to parse A records\n");
 			free   (p->resources);
 			return;
 		}
 		p->c_resources = p->header.resource_entries;
+		printf("fucdfsdflkdshfkldsjfdjfdfkjfkj %d\n", p->header.resource_entries);
 	}
-
-	printf("finished parsing bruv skeeees\n");
 }
 
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
@@ -498,17 +489,15 @@ void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {
 	}
 }
 
-int dns_pwrite_question(struct dns_packet *p, const char *domain) {
-	struct dns_question *question = malloc(sizeof(struct dns_question));
+int dns_pwrite_question(struct dns_packet *p, struct dns_question q) {
+	struct dns_question *question = malloc(sizeof(struct dns_question)); *question = q;
+	size_t memsize = (p->c_questions + 1) * sizeof(struct dns_question);
+	p->questions = p->questions ? realloc(p->questions, memsize) : malloc(memsize); // okay... this is fucked
+	p->questions[p->c_questions] = question;
 
-	strcpy(question->Name, domain);
-	question->Type  = 1;
-	question->Class = 1;
-
-	p->questions = realloc(p->questions, p->c_questions * sizeof(struct dns_question)); // okay this is actually fucked
-	p->questions[p->c_questions++] = question;
 	p->header.questions++;
- 
+	p->c_questions++;
+
 	return sizeof *question;
 }
 
@@ -529,15 +518,10 @@ int dns_pwrite_A_answer(struct dns_packet *p, const char *domain, uint32_t ipv4)
 
 void dns_pprint(struct dns_packet p) {
 	dns_print_header(p.header);
-	while (p.c_questions > 0)
-		dns_print_question(*p.questions[--p.c_questions]);
-	while (p.c_answers > 0)
-		dns_print_record(*p.answers[--p.c_answers]);
-	while (p.c_authorities > 0)
-		dns_print_record(*p.authorities[--p.c_authorities]);
-	printf("%ld\n", p.c_resources);
-	while (p.c_resources > 0)
-		dns_print_record(*p.resources[--p.c_resources]);
+	while (p.c_questions > 0) dns_print_question(*p.questions[--p.c_questions]);
+	while (p.c_answers > 0) dns_print_record(*p.answers[--p.c_answers]);
+	while (p.c_authorities > 0) dns_print_record(*p.authorities[--p.c_authorities]);
+	while (p.c_resources > 0) dns_print_record(*p.resources[--p.c_resources]);
 }
 
 void dns_free_packet(struct dns_packet *p) {
