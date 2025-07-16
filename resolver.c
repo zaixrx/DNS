@@ -1,5 +1,5 @@
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "dnsutils.h"
 
 int read_file(const char *path, char *buf, size_t buf_size) {

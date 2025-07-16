@@ -1,11 +1,11 @@
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef DNSUTILS_H 
+#define DNSUTILS_H
 
-#include <netinet/in.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 
-#define BUFF_SIZE 512
+#define BUFF_SIZE 4096
 #define NAME_SIZE 64
 #define HEADER_SIZE 12
 
@@ -104,9 +104,9 @@ struct dns_packet {
 	size_t c_resources;
 };
 
-void dns_print_header(struct dns_header     header);
+void dns_print_header(struct dns_header header);
 void dns_print_question(struct dns_question question);
-void dns_print_record(struct dns_record   record);
+void dns_print_record(struct dns_record record);
 void dns_print_packet(struct dns_packet packet);
 
 struct dns_packet *dns_new_packet(struct dns_header header);

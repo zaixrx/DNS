@@ -276,9 +276,11 @@ void dns_print_question(struct dns_question q) {
 }
 
 int dns_parse_records(struct dns_buffer *b, struct dns_record **records, size_t records_count) {
-	while (records_count > 0) {
+	unsigned int i = 0;
+	while (i < records_count) {
+		printf("%u/%lu: at pos %u\n", i, records_count, b->pos);
 		struct dns_record *record = malloc(sizeof(struct dns_record));
-		records[--records_count] = record;
+		records[i++] = record;
 
 		int size = parse_labels(b, record->Name);
 
@@ -288,6 +290,7 @@ int dns_parse_records(struct dns_buffer *b, struct dns_record **records, size_t 
 		
 		int rd_size = gets(b);
 		
+
 		switch (record->Type) {
 			case RT_A: {
 				getr(b, &record->RD.A.IPv4, rd_size);
@@ -413,6 +416,8 @@ struct dns_packet *dns_new_packet(struct dns_header header) {
 }
 
 void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
+	memset(p, 0, sizeof *p);
+
 	if (dns_parse_header(b, &p->header) < 0) {
 		fprintf(stderr, "could not parse header!\n");
 		return;
@@ -458,6 +463,8 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 		}
 		p->c_resources = p->header.resource_entries;
 	}
+
+	printf("finished parsing bruv skeeees\n");
 }
 
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b) {

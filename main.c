@@ -1,18 +1,7 @@
 #include <errno.h>
-#include <fcntl.h>
-#include <string.h>
-#include <sys/types.h>
-#include <threads.h>
 #include <time.h>
-#include <stdlib.h>
-#include <netinet/in.h>
-#include <stddef.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <unistd.h>
-
 #include "dnsutils.h"
 
 #define HTABLE_IMPLEMENTATION
@@ -104,7 +93,6 @@ int main(void) {
 	printf("successfully bound socket to %s:%d\n", ADDRESS, PORT);
 
 	struct dns_packet packet;
-
 	for (;;) {
 		struct dns_buffer buf_view = {0};
 
@@ -118,8 +106,7 @@ int main(void) {
 		int tries;
 		for (tries = 0; tries < ROOT_MAX_RETRIES; tries++) {
 			sleep(1);
-
-			srand(time(NULL)); // seed rand
+			srand(time(NULL));
 			ADDR_IN addr = getaddr(root_servers[rand() % 13], 53);
 			socklen_t addrlen = sizeof addr;
 			if ((sendto(sockfd, buf_view.buf, buf_view.size, 0, (ADDR*)&addr, addrlen) < 0)) {
@@ -134,7 +121,7 @@ int main(void) {
 				fprintf(stderr, "failed to read response from root server, retrying...\n");
 				continue;
 			}
-			printf("Got response from root server\n");
+			printf("Got response of size %d bytes, from root server\n", buf_view.size);
 
 			printf("Piping response content to ./root_response.txt\n");
 			write_file("./metadata/root_response.txt", &buf_view);
