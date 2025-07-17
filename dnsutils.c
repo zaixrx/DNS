@@ -454,7 +454,6 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 			return;
 		}
 		p->c_resources = p->header.resource_entries;
-		printf("fucdfsdflkdshfkldsjfdjfdfkjfkj %d\n", p->header.resource_entries);
 	}
 }
 
@@ -533,4 +532,5 @@ void dns_free_packet(struct dns_packet *p) {
 	free(p->authorities);
 	while(p->c_resources > 0) free(p->resources[--p->c_resources]);
 	free(p->resources);
+	bzero(p, sizeof(struct dns_packet));
 }

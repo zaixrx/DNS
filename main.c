@@ -1,11 +1,13 @@
 #include <arpa/inet.h>
-#include <errno.h>
+#include <asm-generic/socket.h>
 #include <netinet/in.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <string.h>
 #include "dnsutils.h"
 
 #define HTABLE_IMPLEMENTATION
@@ -17,10 +19,22 @@
 
 #define PORT 12000
 #define ADDRESS "0.0.0.0"
-#define ROOT_MAX_RETRIES 10
+#define MAX_RETRIES 10
 #define _RETRANSMISSION_INTERVAL 2 // seconds
+#define SOCK_IO_TIMEOUT 10
 
-static char root_servers[][INET_ADDRSTRLEN] = {
+struct IPView {
+	union {
+		ADDR_IN  ipv4;
+		ADDR_IN6 ipv6;
+	} ip;
+	enum {
+		_IPv4,
+		_IPv6,
+	} ip_version;
+};
+
+char root_servers[][INET_ADDRSTRLEN] = {
 	"198.41.0.4",
 	"170.247.170.2",
 	"192.33.4.12",
@@ -35,8 +49,18 @@ static char root_servers[][INET_ADDRSTRLEN] = {
 	"199.7.83.42",
 	"202.12.27.33",
 };
+HashTable hs;
+int sockfd;
 
 // START_GARBAGE
+static inline void log_info (const char *msg) {
+	fprintf(stdout, "INFO: %s\n", msg);
+}
+
+static inline void log_error(const char *msg) {
+	fprintf(stderr, "ERROR: %s\n", msg);
+}
+
 static inline void entry_presentation() {
 	printf("making pancakes making making pancakes\n");
 	printf("take some bacon, and I'll put it in the pancake\n");
@@ -52,9 +76,6 @@ void write_file(const char *filepath, struct dns_buffer *buf) {
 }
 // END_GARBAGE
 
-static HashTable hs;
-static int sockfd;
-
 ADDR_IN getaddr(const char *saddr, uint16_t port) {
 	ADDR_IN addr = {0};
 	addr.sin_family = AF_INET;
@@ -63,73 +84,35 @@ ADDR_IN getaddr(const char *saddr, uint16_t port) {
 	return addr;
 }
 
-struct IPView {
-	union {
-		ADDR_IN  ipv4;
-		ADDR_IN6 ipv6;
-	} ip;
-	enum {
-		_IPv4,
-		_IPv6,
-	} ip_version;
-};
-
 void check(bool is_error, const char *err_msg) {
 	 if (is_error) {
-		 perror(err_msg);
+		 log_error(err_msg);
 		 exit(EXIT_FAILURE);
 	 }
 }
 
-ssize_t query_ns(const struct dns_question question, struct IPView ipv) {
-	struct dns_packet packet = {0};
-
-	struct dns_header header = {0};
-	header.id = 69;
-	header.recursion_desired = true;
-	header.checking_disabled = true;
-
-	packet.header = header;
-	dns_pwrite_question(&packet, question);
-
-	struct dns_buffer buffer = {0};
-	dns_ptob(&packet, &buffer);
-
-	ADDR addr = {0};
-	switch (ipv.ip_version) {
-		case _IPv4: {
-			memcpy(&addr, &ipv.ip.ipv4, sizeof ipv.ip.ipv4);
-		} break;
-		case _IPv6: {
-			memcpy(&addr, &ipv.ip.ipv6, sizeof ipv.ip.ipv6);
-		} break;
-		default: return -1;
-	}
-
-	return sendto(sockfd, &buffer.buf, buffer.size, 0, &addr, sizeof addr) < 0;
+void print_ipv4(uint32_t ipv4) {
+	char outstr[INET_ADDRSTRLEN+13] = "Address is: ";
+	inet_ntop(AF_INET, (&ipv4)+13, outstr, INET_ADDRSTRLEN);
+	log_info(outstr);
 }
 
-ssize_t recv_ns(struct dns_buffer *b, struct IPView ipv) {
-	b->pos = 0;
-
-	char addrstr[INET_ADDRSTRLEN] = {0};
-	inet_ntop(AF_INET, &ipv.ip.ipv4, addrstr, sizeof addrstr);
-
-	printf("address is %s\n", addrstr);
-
-	ADDR *addr = (ADDR*)&ipv.ip.ipv4;
-	socklen_t addrlen = sizeof ipv.ip.ipv4;
-	// do proper timeouts(intially of course) and retries
-	// the address you are providing is surely wrong fix it
-	return b->size = recvfrom(sockfd, b->buf, sizeof b->buf, 0, addr, &addrlen);
+// only maintain header and one question
+// TODO: make it support multiple questions
+void trim_packet(struct dns_packet *packet) {
+	struct dns_header header = { .id = packet->header.id };
+	struct dns_question question = *packet->questions[0];
+	dns_free_packet(packet);
+	packet->header = header;
+	dns_pwrite_question(packet, question);
 }
 
-struct IPView extract_best_ipv4(struct dns_packet packet) {
-	int i = 0;
-	struct IPView ipv = {0};
+struct IPView extract_best_ipv4(struct dns_packet *packet) {
+	struct IPView ipv = {0};	
+
 	struct dns_record *rr = NULL;
-	while (i < packet.c_resources) {
-		rr = packet.resources[i];
+	for (int i = 0; i < packet->c_resources; ++i) {
+		rr = packet->resources[i];
 
 		if (rr->Type == RT_A) {
 			ipv.ip_version = _IPv4;
@@ -140,112 +123,106 @@ struct IPView extract_best_ipv4(struct dns_packet packet) {
 			ipv.ip.ipv4.sin_addr.s_addr = rr->RD.A.IPv4;
 
 			break;
-		} /* else if (rr->Type == RT_AAAA) {
-			ipv.ip_version = _IPv6;
-			ipv.ip.ipv6 = (ADDR_IN6){
-				.sin6_family = AF_INET,
-				.sin6_port = ntohs(PORT),
-				.sin6_addr.= rr->RD.AAAA.IPv6,
-			}
-		}*/
-		i++;
+		}
+
+		// TODO: support IPv6
 	}
 
-	check(rr == NULL, "sorry champ no ipv4 resource for you <:( \n");
-	
+	if (rr == NULL) {
+		srand(time(NULL));
+		ipv.ip_version = _IPv4;
+		ipv.ip.ipv4 = getaddr(root_servers[rand() % 13], 53);
+	}
+
 	return ipv;
+}
+
+// packet is expected to be trimmed
+int query_ns(struct dns_buffer *buf_view, struct dns_packet *packet, struct IPView ipv) {
+	ADDR addr = {0};
+	switch (ipv.ip_version) {
+		case _IPv4: {
+			addr = *(ADDR*)&ipv.ip.ipv4;
+		} break;
+		// TODO: Add IPv6 support
+		default: {
+			log_error("unsupported IP address");
+		} return -1;
+	}
+
+	dns_ptob(packet, buf_view);
+
+	int retries;
+	for (retries = 0; retries < MAX_RETRIES; ++retries) {
+		if (retries > 0) sleep(_RETRANSMISSION_INTERVAL);
+		if (sendto(sockfd, &buf_view->buf, buf_view->size, 0, &addr, sizeof addr) < 0) {
+			log_error("failed to send query");
+			continue;
+		}
+
+		socklen_t addrlen = sizeof ipv.ip.ipv4;
+		buf_view->size = recvfrom(sockfd, buf_view->buf, sizeof buf_view->buf, 0, (ADDR*)&ipv.ip.ipv4, &addrlen);
+		if (buf_view->size < 0) {
+			log_error("failed to receive response");
+			continue;
+		}
+
+		log_info("successfully issued query");
+		break;
+	}
+
+	return retries == MAX_RETRIES ? -1 : 0;
+}
+
+uint32_t resolve(struct dns_buffer *buf_view, struct dns_packet *packet, int i) {
+	struct IPView ipv = extract_best_ipv4(packet);
+
+	memset(buf_view, 0, sizeof *buf_view);
+	trim_packet(packet);
+
+	if (query_ns(buf_view, packet, ipv) < 0) return -1; // query_ns does logging
+
+	dns_btop(buf_view, packet);
+	printf("step: %d\n", i);
+
+	if (packet->header.authoritative_answer) {
+		for (int i = 0; i < packet->c_answers; ++i) {
+			struct dns_record *answer= packet->answers[i];
+			if (answer->Type == packet->questions[0]->Type) continue;
+			return answer->RD.A.IPv4;
+		}
+	}
+
+	return resolve(buf_view, packet, ++i);
 }
 
 int main(void) {
 	entry_presentation();
 
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd < 0) {
-		fprintf(stderr, "could not initialize socket\n");
-		return EXIT_FAILURE;
-	}
+	check((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0, "failed opening socket file descriptor\n");
 
 	int reuseaddropt = 1;
-	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuseaddropt, sizeof reuseaddropt) < 0) {
-		fprintf(stderr, "could not set socket option REUSE ADDRESS\n");
-		return EXIT_FAILURE;
-	}
+	check (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuseaddropt, sizeof reuseaddropt) < 0, "failed configuring socket REUSEADDR\n");
+
+	struct timeval timeout = { .tv_sec = SOCK_IO_TIMEOUT, .tv_usec = 0 };
+	check(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) < 0, "failed configuring socket RCVTIMEO\n");
+	check(setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) < 0, "failed configuring socket SNDTIMEO\n");
 
 	ADDR_IN sock_addr = getaddr(ADDRESS, PORT);
-	if (bind(sockfd, (ADDR*)&sock_addr, sizeof sock_addr) < 0) {
-		fprintf(stderr, "could not bind socket %d", errno);
-		return EXIT_FAILURE;
-	}
+	check(bind(sockfd, (ADDR*)&sock_addr, sizeof sock_addr) < 0, "could not datagram socket\b");
 
-	char hello[] = "hello\r\n";
-	ADDR_IN test_addr = getaddr("127.0.0.1", 8080);
-	if (sendto(sockfd, hello, sizeof hello, 0, (ADDR*)&test_addr, sizeof test_addr) < 0) {
-		fprintf(stderr, "failed to send test message, errno: %d\n", errno);
-		return EXIT_FAILURE;
-	};
-
-	printf("successfully bound socket to %s:%d\n", ADDRESS, PORT);
-
-	struct dns_packet packet;
 	for (;;) {
 		struct dns_buffer buf_view = {0};
+		struct dns_packet packet   = {0};
 
-		printf("Waiting for stub resovler\n");
-		if ((buf_view.size = recv(sockfd, buf_view.buf, sizeof buf_view.buf, 0)) < 0) {
-			fprintf(stderr, "could not read from buffer\n");
-			continue;
-		}
-		printf("Got a message from the stub resovler\n");
+		check((buf_view.size = recv(sockfd, buf_view.buf, sizeof buf_view.buf, 0)) < 0, "failed while reading query\n");
+		dns_btop(&buf_view, &packet);
 
-		int tries = 0;
-		for (tries = 0; tries < ROOT_MAX_RETRIES; ++tries) {
-			if (tries > 0) sleep(_RETRANSMISSION_INTERVAL);
-			
-			srand(time(NULL));
-			ADDR_IN addr = getaddr(root_servers[rand() % 13], 53);
-			socklen_t addrlen = sizeof addr;
-			if ((sendto(sockfd, buf_view.buf, buf_view.size, 0, (ADDR*)&addr, addrlen) < 0)) {
-				fprintf(stderr, "Failed to query root server %d\n", errno);
-				continue;
-			}
+		trim_packet(&packet); // this is done because when getting the best ipv4 we use resources which must only depend
+				      // on our query response! (see extract_best_ipv4)
 
-			memset(&buf_view, 0, sizeof buf_view);
-			buf_view.size = recvfrom(sockfd, buf_view.buf, sizeof buf_view.buf, 0, (ADDR*)&addr, &addrlen);
-			check(buf_view.size < 0,"failed to read response from root server, retrying...\n");
-			dns_btop(&buf_view, &packet);
-			dns_pprint(packet);
-	
-			struct IPView ipv = extract_best_ipv4(packet);
-			check(query_ns((struct dns_question) { .Name = "google.com", .Class = 1, .Type = 1 }, ipv) == -1, "you \
-					have got bamboozeld mine frienda balls\n");
-			check(recv_ns(&buf_view, ipv) == -1, "bad luck! could not query TLD\n");
-			dns_btop(&buf_view, &packet);
-			dns_pprint(packet);
-
-			ipv = extract_best_ipv4(packet);
-			check(query_ns((struct dns_question) { .Name = "google.com", .Class = 1, .Type = 1 }, ipv) == -1, "you \
-					have got bamboozeld mine frienda balls\n");
-			check(recv_ns(&buf_view, ipv) == -1, "bad luck! could not query TLD\n");
-			dns_btop(&buf_view, &packet);
-			dns_pprint(packet);
-
-			ipv = extract_best_ipv4(packet);
-			check(query_ns((struct dns_question) { .Name = "google.com", .Class = 1, .Type = 1 }, ipv) == -1, "you \
-					have got bamboozeld mine frienda balls\n");
-			check(recv_ns(&buf_view, ipv) == -1, "bad luck! could not query TLD\n");
-			dns_btop(&buf_view, &packet);
-			dns_pprint(packet);
-
-			if (packet.answers > 0) {
-				char ipstr[INET_ADDRSTRLEN] = {0};
-				inet_ntop(AF_INET, &packet.answers[0]->RD.A.IPv4, ipstr, sizeof ipstr);
-				printf("Your IP sir %s\n", ipstr);
-			}
-
-			break;
-		}
-
-		check(tries == ROOT_MAX_RETRIES, "Exceeded retry limit, exiting...");
+		int32_t addr = resolve(&buf_view, &packet, 0);
+		check(addr < 0, "failed to recursively resolve packet\n");
 	}
 
 	return EXIT_FAILURE;
