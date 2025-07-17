@@ -1,8 +1,9 @@
 # Context
-now I have implemented a really basic stub resolvers that works on optimal conditions under my supposition(yes it's a word) writing unit tests and maybe even benchmarks is a clear next step that'll come(insha'allah) after making the next thing which is trivially a DNS server! maybe even mDNS idk(which was the hole purpose of the project anyway)
+I guess I'm done with recursive resolvers as It's not really the goal of this project, next I'll probably check mDNS what I expect from it
+is the ability to join a mutlticast group and forward receive and parse DNS packets, the solution must be running concurrently(I might impelement some kind of schedular for 
 
 # Dependencies
-cJSON it's also dynamically linked soo that's a little bit fucked up I'll work on the structure though
+cJSON used to log packet content
 
 # Resources:
 - DNS Guide: https://github.com/EmilHernvall/dnsguide

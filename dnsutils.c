@@ -410,12 +410,10 @@ void dns_print_record(struct dns_record record) {
 
 void dns_btop(struct dns_buffer *b, struct dns_packet *p) {
 	memset(p, 0, sizeof *p);
-
 	if (dns_parse_header(b, &p->header) < 0) {
 		fprintf(stderr, "could not parse header!\n");
 		return;
 	}
-
 	if (p->header.questions > 0) {
 		p->questions = malloc(p->header.questions * sizeof(struct dns_question*));
 		if (dns_parse_questions(b, p->questions, p->header.questions) < 0) {
@@ -532,5 +530,5 @@ void dns_free_packet(struct dns_packet *p) {
 	free(p->authorities);
 	while(p->c_resources > 0) free(p->resources[--p->c_resources]);
 	free(p->resources);
-	bzero(p, sizeof(struct dns_packet));
+	memset(p, 0, sizeof *p);
 }

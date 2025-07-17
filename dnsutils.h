@@ -6,7 +6,8 @@
 #include <netinet/in.h>
 
 #define BUFF_SIZE 4096
-#define NAME_SIZE 64
+#define NAME_SIZE 255
+#define NAME_OCTET_SIZE 63
 #define HEADER_SIZE 12
 
 // RFC pages refer to Record as RR(Resource Record)
