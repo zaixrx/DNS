@@ -158,10 +158,9 @@ struct IPView extract_best_ipv4(struct dns_packet *packet) {
 				}
 				log_info("found IPv4 address for NS record");
 				ipv.ip_version = _IPv4;
-				memset(&ipv.ip.ipv4, 0, sizeof ipv.ip.ipv4);
 				ipv.ip.ipv4.sin_family = AF_INET;
 				ipv.ip.ipv4.sin_port   = ntohs(53);
-				ipv.ip.ipv4.sin_addr.s_addr = rr->RD.A.IPv4;
+				ipv.ip.ipv4.sin_addr.s_addr = addr;
 
 				return ipv;
 			}
