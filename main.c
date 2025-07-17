@@ -22,6 +22,7 @@
 #define MAX_RETRIES 10
 #define _RETRANSMISSION_INTERVAL 2 // seconds
 #define SOCK_IO_TIMEOUT 10
+#define DO_LOG 
 
 struct IPView {
 	union {
@@ -92,8 +93,8 @@ void check(bool is_error, const char *err_msg) {
 }
 
 void print_ipv4(uint32_t ipv4) {
-	char outstr[INET_ADDRSTRLEN+13] = "Address is: ";
-	inet_ntop(AF_INET, (&ipv4)+13, outstr, INET_ADDRSTRLEN);
+	char outstr[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &ipv4, outstr, INET_ADDRSTRLEN);
 	log_info(outstr);
 }
 
@@ -107,32 +108,72 @@ void trim_packet(struct dns_packet *packet) {
 	dns_pwrite_question(packet, question);
 }
 
+uint32_t resolve(struct dns_buffer *buf_view, struct dns_packet *packet, int i);
+
 struct IPView extract_best_ipv4(struct dns_packet *packet) {
-	struct IPView ipv = {0};	
+	struct IPView ipv = {0};
 
 	struct dns_record *rr = NULL;
-	for (int i = 0; i < packet->c_resources; ++i) {
-		rr = packet->resources[i];
+	if (packet->c_resources > 0) {
+		for (int i = 0; i < packet->c_resources; ++i) {
+			rr = packet->resources[i];
 
-		if (rr->Type == RT_A) {
-			ipv.ip_version = _IPv4;
+			if (rr->Type == RT_A) {
+				ipv.ip_version = _IPv4;
 
-			ipv.ip.ipv4 = (ADDR_IN){0};
-			ipv.ip.ipv4.sin_family = AF_INET;
-			ipv.ip.ipv4.sin_port   = ntohs(53);
-			ipv.ip.ipv4.sin_addr.s_addr = rr->RD.A.IPv4;
+				memset(&ipv.ip.ipv4, 0, sizeof ipv.ip.ipv4);
+				ipv.ip.ipv4.sin_family = AF_INET;
+				ipv.ip.ipv4.sin_port   = ntohs(53);
+				ipv.ip.ipv4.sin_addr.s_addr = rr->RD.A.IPv4;
 
-			break;
+				return ipv;
+			}
+
+			// TODO: support IPv6
 		}
+	} else if (packet->c_authorities > 0) {
+		log_info("could not find glued A record");
+		for (int i = 0; i < packet->c_authorities; ++i) {
+			rr = packet->authorities[i];
 
-		// TODO: support IPv6
-	}
+			if (rr->Type == RT_NS) {
+				struct dns_buffer buf_view = {0};
+				struct dns_packet packet    = {0};
+				packet.header = (struct dns_header){
+					.id = 69,
+				};
+				struct dns_question question = {
+					.Type = RT_A,
+					.Class = 1
+				};
+				memcpy(question.Name, rr->RD.NS.Host, sizeof rr->RD.NS.Host);
+				dns_pwrite_question(&packet, question);
+				// you need some sort of state machine
+				// to get the current ns
+				log_info("starting resolve parallel process for NS record");
+				uint32_t addr = resolve(&buf_view, &packet, 0);
+				if (addr < 0) {
+					log_error("failed to resolve NS record");
+					continue;
+				}
+				log_info("found IPv4 address for NS record");
+				ipv.ip_version = _IPv4;
+				memset(&ipv.ip.ipv4, 0, sizeof ipv.ip.ipv4);
+				ipv.ip.ipv4.sin_family = AF_INET;
+				ipv.ip.ipv4.sin_port   = ntohs(53);
+				ipv.ip.ipv4.sin_addr.s_addr = rr->RD.A.IPv4;
 
-	if (rr == NULL) {
-		srand(time(NULL));
-		ipv.ip_version = _IPv4;
-		ipv.ip.ipv4 = getaddr(root_servers[rand() % 13], 53);
-	}
+				return ipv;
+			}
+
+			// TODO: support IPv6
+		}
+	} 
+
+	log_info("could not find useful info, starting over");
+	srand(time(NULL));
+	ipv.ip_version = _IPv4;
+	ipv.ip.ipv4 = getaddr(root_servers[rand() % 13], 53);
 
 	return ipv;
 }
@@ -183,13 +224,29 @@ uint32_t resolve(struct dns_buffer *buf_view, struct dns_packet *packet, int i) 
 	if (query_ns(buf_view, packet, ipv) < 0) return -1; // query_ns does logging
 
 	dns_btop(buf_view, packet);
-	printf("step: %d\n", i);
 
-	if (packet->header.authoritative_answer) {
-		for (int i = 0; i < packet->c_answers; ++i) {
-			struct dns_record *answer= packet->answers[i];
-			if (answer->Type == packet->questions[0]->Type) continue;
-			return answer->RD.A.IPv4;
+#ifdef DO_LOG
+	printf("step: %d\n", i);
+	dns_pprint(*packet);
+#endif
+
+	struct dns_question *question = packet->questions[0];
+	if (question == NULL) {
+		log_error("no questions provided");
+		return -1;
+	}
+
+	for (int i = 0; i < packet->c_answers; ++i) {
+		struct dns_record *answer = packet->answers[i];
+		if (answer->Type != question->Type) continue;
+		switch (question->Type) {
+			case RT_A: {
+				return answer->RD.A.IPv4;
+			} break;
+			default: {
+				log_error("unsupported query type"); // I think that must come early
+				return -1;
+			} break;
 		}
 	}
 
@@ -215,14 +272,28 @@ int main(void) {
 		struct dns_buffer buf_view = {0};
 		struct dns_packet packet   = {0};
 
-		check((buf_view.size = recv(sockfd, buf_view.buf, sizeof buf_view.buf, 0)) < 0, "failed while reading query\n");
+		ADDR client_addr = {0};
+		socklen_t addrlen = sizeof client_addr;
+
+		check((buf_view.size = recvfrom(sockfd, buf_view.buf, sizeof buf_view.buf, 0, (ADDR*)&client_addr, &addrlen)) < 0, "failed while reading query\n");
 		dns_btop(&buf_view, &packet);
 
 		trim_packet(&packet); // this is done because when getting the best ipv4 we use resources which must only depend
 				      // on our query response! (see extract_best_ipv4)
 
-		int32_t addr = resolve(&buf_view, &packet, 0);
+		uint32_t addr = resolve(&buf_view, &packet, 0);
 		check(addr < 0, "failed to recursively resolve packet\n");
+
+		print_ipv4(addr);
+		
+		struct dns_header header = {0};
+		header.id = packet.header.id;
+		header.response = true;
+		header.recursion_available = true;
+		packet.header = header;
+		dns_pwrite_answer(&packet, packet.questions[0]->Name, addr);
+		dns_ptob(&packet, &buf_view);
+		check(sendto(sockfd, buf_view.buf, buf_view.size, 0, &client_addr, addrlen) < 0, "failed to send client response");
 	}
 
 	return EXIT_FAILURE;

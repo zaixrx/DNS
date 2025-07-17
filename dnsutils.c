@@ -500,7 +500,7 @@ int dns_pwrite_question(struct dns_packet *p, struct dns_question q) {
 	return sizeof *question;
 }
 
-int dns_pwrite_A_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
+int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
 	struct dns_record *record = malloc(sizeof(struct dns_record));
 	strcpy(record->Name, domain);
 	record->Type  = 1;
