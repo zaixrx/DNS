@@ -133,7 +133,7 @@ void handle_client(struct dns_packet *packet, ADDR *addr) {
 	rpacket.header.recursion_available = true;
 	struct dns_buffer buf = {0};
 	dns_ptob(&rpacket, &buf); // TODO: might fail
-	// TODO: handle dropped packets
+	// TODO: can this fail?
 	sendto(sockfd, buf.buf, buf.size, 0, addr, sizeof *addr);
 }
 

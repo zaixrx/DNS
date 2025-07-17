@@ -1,11 +1,8 @@
 CC=cc
-CFLAGS=-Ilib/ -g
+CFLAGS=-Ilib/ -Llib/ -lcjson -g
 
-main: main.c dnsutils.c ./lib/cJSON.o
-	$(CC) $(CFLAGS) -o main.bin $^
+main: main.c dnsutils.c
+	$(CC) -o main.bin $^ $(CFLAGS)
 
-resolve: resolver.c dnsutils.c ./lib/cJSON.o
-	$(CC) $(CFLAGS) -o resolve.bin $^
-
-./lib/cJSON.o: ./lib/cJSON.c
-	$(CC) -c ./lib/cJSON.c -o ./lib/cJSON.o
+resolve: resolver.c dnsutils.c
+	$(CC) -o resolve.bin $^ $(CFLAGS)

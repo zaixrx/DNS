@@ -1,6 +1,7 @@
 # Context
-I guess I'm done with recursive resolvers as It's not really the goal of this project, next I'll probably check mDNS what I expect from it
-is the ability to join a mutlticast group and forward receive and parse DNS packets, the solution must be running concurrently(I might impelement some kind of schedular for 
+I have completed(alhamuliallah)a cacheless dns recursive resolver with basic Implementation, I'll try
+to implement caching and IPv6 support refactor some code and I think that'll be it the main project isn't
+a recursive resolver it's mDNS(crazy right!)
 
 # Dependencies
 cJSON used to log packet content
