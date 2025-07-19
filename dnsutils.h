@@ -98,7 +98,7 @@ struct dns_record {
 	DNSRType    Type;
 	DNSRClass   Class;
 	uint32_t    TTL;
-	uint16_t    RDLENGTH;	
+	uint16_t    RDLENGTH;
 	union DNSRData RD;
 };
 
@@ -128,7 +128,7 @@ void dns_btop(struct dns_buffer *b, struct dns_packet *p);
 void dns_ptob(struct dns_packet *p, struct dns_buffer *b);
 
 int  dns_pwrite_question(struct dns_packet *p, struct dns_question q);
-int  dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4);
+int  dns_pwrite_answer(struct dns_packet *p, struct dns_record);
 void dns_pprint(struct dns_packet p);
 
 #endif

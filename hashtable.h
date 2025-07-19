@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <netinet/in.h>
 
-#define HTABLE_CAP 10 
 #define HTABLE_ERR -1
 #define HTABLE_SUCC 0
 
@@ -21,7 +20,8 @@ struct table_entry {
 };
 
 typedef struct {
-	struct table_entry *entries[HTABLE_CAP];
+	size_t capacity;
+	struct table_entry **entries;
 } HashTable;
 
 void table_append(HashTable*, struct table_entry_data);
@@ -33,15 +33,18 @@ void table_free(HashTable*);
 
 #ifdef HTABLE_IMPLEMENTATION
 
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
 
-// key max size is 32 chars!
-uint32_t hash(const char *key) {
-	if (!key) return HTABLE_ERR;
-	int result = 0;
-	while (*key != '\0') result += *key++;
-	return result;
+uint32_t hash(HashTable *ht, const char* key) {
+    	uint32_t sum = 0, factor = 31;
+    	for (int i = 0; i < strlen(key); i++) {
+    	    	sum += (key[i] * factor) % ht->capacity;
+	    	sum %= ht->capacity;
+    	    	factor *= 31;
+		factor %= __INT16_MAX__;
+    	}
+    	return sum;
 }
 
 void table_append(HashTable *ht, struct table_entry_data entry_data) {
@@ -50,7 +53,7 @@ void table_append(HashTable *ht, struct table_entry_data entry_data) {
 	hte->next = NULL;
 	hte->data = entry_data;
 
-	int index = hash(entry_data.domain_name) % HTABLE_CAP;
+	int index = hash(ht, entry_data.domain_name);
 
 	if (ht->entries[index] == NULL) { ht->entries[index] = hte; return; }
 	
@@ -60,7 +63,7 @@ void table_append(HashTable *ht, struct table_entry_data entry_data) {
 }
 
 struct table_entry *table_lookup(HashTable *ht, const char *domain_name) {
-	int index = hash(domain_name);
+	int index = hash(ht, domain_name);
 	if (ht->entries[index] == NULL) return NULL;
 	for (struct table_entry *te = ht->entries[index]; te; te = te->next)
 		if (strcmp(te->data.domain_name, domain_name) == 0) return te;
@@ -68,13 +71,9 @@ struct table_entry *table_lookup(HashTable *ht, const char *domain_name) {
 }
 
 int table_remove(HashTable *ht, const char *domain_name) {
-	int index = hash(domain_name);
+	int index = hash(ht, domain_name);
 	if (ht->entries[index] == NULL) return HTABLE_ERR;
 	
-	// find it's index in the linked list
-	// if the last free and NULL
-	// if middle free and next to prev next
-	// if first head is next
 	struct table_entry *prev = NULL, *curr;
 	// I know I know I'm fucking smart
 	for (curr = ht->entries[index]; curr || prev; curr = (prev = curr)->next) {
@@ -96,7 +95,7 @@ int table_remove(HashTable *ht, const char *domain_name) {
 }
 
 void table_free(HashTable *ht) {
-	for (int i = 0; i < HTABLE_CAP; i++) {
+	for (int i = 0; i < ht->capacity; i++) {
 		struct table_entry *ptr = ht->entries[i];
 		while (ptr) {
 			void *temp = ptr;

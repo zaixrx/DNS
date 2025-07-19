@@ -1,3 +1,4 @@
+#include <alloca.h>
 #include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -491,25 +492,18 @@ int dns_pwrite_question(struct dns_packet *p, struct dns_question q) {
 	size_t memsize = (p->c_questions + 1) * sizeof(struct dns_question);
 	p->questions = p->questions ? realloc(p->questions, memsize) : malloc(memsize); // okay... this is fucked
 	p->questions[p->c_questions] = question;
-
 	p->header.questions++;
 	p->c_questions++;
-
 	return sizeof *question;
 }
 
-int dns_pwrite_answer(struct dns_packet *p, const char *domain, uint32_t ipv4) {
-	struct dns_record *record = malloc(sizeof(struct dns_record));
-	strcpy(record->Name, domain);
-	record->Type  = 1;
-	record->Class = 1;
-	record->TTL   = 69;
-	record->RD.A.IPv4  = ipv4;
-
-	p->answers = realloc(p->answers, p->c_answers * sizeof(struct dns_record)); // okay this is actually fucked
-	p->answers[p->c_answers++] = record;
+int dns_pwrite_answer(struct dns_packet *p, struct dns_record answer) {
+	struct dns_record *record = malloc(sizeof(struct dns_record)); *record = answer;
+	size_t memsize = p->c_answers * sizeof(struct dns_record);
+	p->answers = p->answers ? realloc(p->answers, memsize) : malloc(memsize); // okay... this is fucked!
+	p->answers[p->c_answers] = record;
+	p->c_answers++;
 	p->header.answers++;
- 
 	return sizeof *record;
 }
 
