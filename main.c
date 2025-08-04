@@ -125,9 +125,11 @@ void printip(int af, uint8_t *addr) {
 void handle_client(struct dns_packet *packet, ADDR *addr) {
 	if (packet == NULL || addr == NULL) return;
 	struct dns_packet rpacket = {0};
+	struct dns_buffer buf = {0};
 	rpacket.header = (struct dns_header) {
 		.id = packet->header.id,
 		.rescode = FORMERR,
+		.response = true,
 		.recursion_available = true,
 	};
 	// TODO: Handle multiple questions
@@ -150,10 +152,6 @@ void handle_client(struct dns_packet *packet, ADDR *addr) {
 			rpacket.header.rescode = NOTIMP;
 		}
 	}
-	rpacket.header.id = packet->header.id;
-	rpacket.header.response = true;
-	rpacket.header.recursion_available = true;
-	struct dns_buffer buf = {0};
 	dns_ptob(&rpacket, &buf); // TODO: might fail
 	sendto(sockfd, buf.buf, buf.size, 0, addr, sizeof *addr); // TODO: maybe retry?
 }
